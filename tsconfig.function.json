@@ -1,0 +1,11 @@
+{
+    "include": ["./page_function_src/**/*"],
+    
+  "compilerOptions": {
+    "outDir": "./functions",
+    "target": "esnext",
+    "module": "esnext",
+    "lib": ["esnext"],
+    "types": ["./page_function_src/types.d.ts"]
+  }
+}
