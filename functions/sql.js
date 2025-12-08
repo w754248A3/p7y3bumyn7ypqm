@@ -5,7 +5,16 @@ export const onRequestGet = async (context) => {
         const action = url.searchParams.get("action");
         const app = url.searchParams.get("app");
         if (app === "TextMessage" && action === "getMessage") {
-            const ps = context.env.database_name.prepare("SELECT text FROM textMessageTable ORDER BY id DESC LIMIT 100");
+            const q = `SELECT text
+                        FROM (
+                            SELECT *
+                            FROM textMessageTable
+                            ORDER BY id DESC 
+                            LIMIT 100
+                        ) AS sub_query
+                        ORDER BY id ASC; 
+                        `;
+            const ps = context.env.database_name.prepare(q);
             const data = await ps.raw();
             return Response.json(data.map(row => row[0]));
         }
