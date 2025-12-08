@@ -80,6 +80,16 @@ const handleKeyDown = (event: KeyboardEvent) => {
   }
 };
 
+// 处理输入框聚焦，确保在移动端键盘弹出时输入框可见
+const handleInputFocus = () => {
+  // 延迟一下，等待键盘完全弹出
+  setTimeout(() => {
+    if (messagesContainer.value) {
+      scrollToBottom();
+    }
+  }, 300);
+};
+
 onMounted(() => {
   getMessage();
 });
@@ -115,6 +125,7 @@ onMounted(() => {
           placeholder="输入消息... (Shift+Enter 换行)"
           rows="1"
           @keydown="handleKeyDown"
+          @focus="handleInputFocus"
           @input="(e) => {
             const target = e.target as HTMLTextAreaElement;
             target.style.height = 'auto';
@@ -146,7 +157,8 @@ onMounted(() => {
 }
 
 .messages-wrapper {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   padding: 20px;
@@ -159,6 +171,7 @@ onMounted(() => {
       rgba(0, 0, 0, 0.03) 2px,
       rgba(0, 0, 0, 0.03) 4px
     );
+  -webkit-overflow-scrolling: touch;
 }
 
 .messages-container {
@@ -234,6 +247,9 @@ onMounted(() => {
   border-top: 1px solid #e0e0e0;
   padding: 15px 20px;
   box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.05);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 10;
 }
 
 .input-wrapper {
@@ -317,8 +333,15 @@ onMounted(() => {
 
 /* 移动端响应式 */
 @media (max-width: 768px) {
+  .chat-container {
+    height: 100%;
+    min-height: 0;
+  }
+
   .messages-wrapper {
     padding: 15px 12px;
+    min-height: 0;
+    flex: 1 1 auto;
   }
 
   .message-bubble {
@@ -332,6 +355,7 @@ onMounted(() => {
 
   .input-container {
     padding: 12px 15px;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
   }
 
   .input-wrapper {
@@ -358,8 +382,15 @@ onMounted(() => {
 }
 
 @media (max-width: 480px) {
+  .chat-container {
+    height: 100%;
+    min-height: 0;
+  }
+
   .messages-wrapper {
     padding: 12px 10px;
+    min-height: 0;
+    flex: 1 1 auto;
   }
 
   .message-bubble {
@@ -377,6 +408,7 @@ onMounted(() => {
 
   .input-container {
     padding: 10px 12px;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
   }
 
   .input-wrapper {

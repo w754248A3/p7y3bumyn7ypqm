@@ -124,20 +124,26 @@ const switchPage = (index: number) => {
 
 .main-content {
   flex: 1;
+  min-height: 0;
   overflow: hidden;
   background: #f5f5f5;
+  display: flex;
+  flex-direction: column;
 }
 
 /* 移动端响应式 */
 @media (max-width: 768px) {
   .app-container {
     flex-direction: column;
+    height: 100vh;
+    height: 100dvh; /* 使用动态视口高度，考虑移动端浏览器UI */
   }
 
   .sidebar {
     width: 100%;
     height: auto;
-    max-height: 200px;
+    max-height: none;
+    flex-shrink: 0;
     padding: 15px;
   }
 
@@ -152,6 +158,7 @@ const switchPage = (index: number) => {
     overflow-x: auto;
     gap: 8px;
     padding-bottom: 5px;
+    -webkit-overflow-scrolling: touch;
   }
 
   .nav-item {
@@ -170,13 +177,19 @@ const switchPage = (index: number) => {
   }
 
   .main-content {
-    height: calc(100vh - 200px);
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
   }
 }
 
 @media (max-width: 480px) {
+  .app-container {
+    height: 100vh;
+    height: 100dvh;
+  }
+
   .sidebar {
-    max-height: 150px;
     padding: 10px;
   }
 
@@ -192,7 +205,8 @@ const switchPage = (index: number) => {
   }
 
   .main-content {
-    height: calc(100vh - 150px);
+    flex: 1;
+    min-height: 0;
   }
 }
 </style>
