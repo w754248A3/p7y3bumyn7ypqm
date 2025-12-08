@@ -49,6 +49,7 @@ const loadFile = async () => {
     data.fileBase64Data = data.fileBase64Data
       ? getBase64Url(data.fileBase64Data)
       : '';
+      console.log(data);
     fileBinding.value = data;
   } catch (err: any) {
     errorMessage.value = err?.message ?? '加载失败，请稍后重试';
