@@ -52,9 +52,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         const app = url.searchParams.get("app");
         if (app === "TextMessage" && action === "sendMessage") {
 
-            const req = await context.request.json<{ text: string }>();
-            const textMessage = req.text;
-
+            const textMessage = await context.request.text;
+           
             const ps = context.env.database_name.prepare("INSERT INTO textMessageTable (text) VALUES (?)");
             const data = await ps.bind(textMessage).run();
 

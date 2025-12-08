@@ -8,31 +8,37 @@ interface Message {
   isSent?: boolean;
 }
 
+interface MessageType {
+  text: string;
+  type: TextType;
+}
+
 const getMessage = async () => {
   const res = await fetch('/sql?app=TextMessage&action=getMessage', {
     method: 'GET',
   });
 
   const data = await res.json();
-  
+  console.log(data);
   // 将数据转换为消息格式，假设数据是字符串数组或对象数组
   if (Array.isArray(data)) {
-    textList.value = data.map((item, index) => {
-      if (typeof item === 'string') {
+    textList.value = data.map<MessageType>(item=> JSON.parse(item)).map((item, index) => {
+     
+      if (item.type === TextType.TEXT){ 
         return {
           id: index,
-          text: item,
+          text: item.text,
           timestamp: new Date().toLocaleTimeString(),
           isSent: index % 2 === 0, // 简单示例：交替显示为发送/接收
         };
       }
-      return {
-        id: item.id || index,
-        text: item.text || item,
-        timestamp: item.timestamp || new Date().toLocaleTimeString(),
-        isSent: item.isSent !== undefined ? item.isSent : index % 2 === 0,
-      };
-    });
+      else{
+        
+        throw new Error("Unsupported message type");
+
+      
+        }
+});
   }
   
   // 滚动到底部
@@ -40,20 +46,39 @@ const getMessage = async () => {
   scrollToBottom();
 };
 
-const sendMessage = async (message: string) => {
-  if (!message.trim()) return;
-  
+const TextType = {
+    TEXT:0,
+    IMAGE:1,
+} as const;
+
+type TextType = (typeof TextType)[keyof typeof TextType];
+
+
+const sendMessage = async (data:MessageType) => {
+ 
   await fetch('/sql?app=TextMessage&action=sendMessage', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ text: message })
+    body: JSON.stringify(data),
   });
+
+};
+
+
+const sendMessageText = async (message: string) => {
+  if (!message.trim()) return;
+  
+  await sendMessage({text:message,type: TextType.TEXT});
 
   inputText.value = '';
   getMessage();
 };
+
+
+
+
 
 const textList = ref<Array<Message>>([]);
 const inputText = ref<string>('');
@@ -76,7 +101,7 @@ watch(textList, () => {
 const handleKeyDown = (event: KeyboardEvent) => {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
-    sendMessage(inputText.value);
+    sendMessageText(inputText.value);
   }
 };
 
@@ -135,7 +160,7 @@ onMounted(() => {
         <button
           type="button"
           class="send-button"
-          @click="sendMessage(inputText)"
+          @click="sendMessageText(inputText)"
           :disabled="!inputText.trim()"
         >
           <span class="send-icon">📤</span>
