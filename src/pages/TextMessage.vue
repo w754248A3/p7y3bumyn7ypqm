@@ -273,12 +273,19 @@ onMounted(() => {
   max-height: 120px;
   overflow-y: auto;
   background: #f8f9fa;
+  color: #333;
+  line-height: 1.5;
 }
 
 .message-input:focus {
   border-color: #667eea;
   background: white;
   box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.message-input::placeholder {
+  color: #999;
+  opacity: 1;
 }
 
 .send-button {
