@@ -4,7 +4,7 @@ export const onRequestGet = async (context) => {
         const q = `SELECT text FROM fileshared WHERE id = 1;`;
         const ps = context.env.database_name.prepare(q);
         const data = await ps.first("text");
-        return Response.json(data);
+        return Response.json(JSON.parse(data));
     }
     catch (e) {
         return Response.json(e);

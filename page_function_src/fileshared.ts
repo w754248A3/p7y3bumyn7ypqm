@@ -13,9 +13,10 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 
 
         const ps = context.env.database_name.prepare(q);
-        const data = await ps.first("text");
+        const data:any = await ps.first("text");
 
-        return Response.json(data);
+        return Response.json(JSON.parse(data));
+
 
 
 
