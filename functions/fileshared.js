@@ -3,7 +3,7 @@ export const onRequestGet = async (context) => {
     try {
         const q = `SELECT text FROM fileshared WHERE id = 1;`;
         const ps = context.env.database_name.prepare(q);
-        const data = await ps.first();
+        const data = await ps.first("text");
         return Response.json(data);
     }
     catch (e) {

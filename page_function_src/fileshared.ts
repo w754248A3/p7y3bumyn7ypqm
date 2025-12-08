@@ -13,7 +13,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 
 
         const ps = context.env.database_name.prepare(q);
-        const data = await ps.first();
+        const data = await ps.first("text");
 
         return Response.json(data);
 
