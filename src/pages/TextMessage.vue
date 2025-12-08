@@ -12,6 +12,18 @@ import { ref } from 'vue';
         textList.value = data;
     };
 
+    const sendMessage = async (message: string) => {
+      await fetch('/sql?app=TextMessage&action=sendMessage', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ text: message })
+      });
+
+      getMessage();
+    };
+
 
     const textList = ref<Array<string>>([]);
     getMessage();    
@@ -28,7 +40,7 @@ import { ref } from 'vue';
         <textarea>
 
         </textarea>
-
+        <button type="button" v-on:click="sendMessage('测试')">Send</button>
     </div>
   </div>
 </template>
