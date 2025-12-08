@@ -1,5 +1,7 @@
 import { createApp } from 'vue'
 import './style.css'
-import App from './App.vue'
+//import App from './App.vue'
+import FileShared from './pages/FileShared.vue'
 
-createApp(App).mount('#app')
+
+createApp(FileShared).mount('#app')
