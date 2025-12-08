@@ -81,8 +81,10 @@ import { ref } from 'vue';
 
 <template>
     <div class="file-shared-container">
+        <p> 共享文件：</p>
         <img v-if="fileBinding.fileBase64Data" :src="fileBinding.fileBase64Data" :alt="fileBinding.fileName" style="max-width: 100%; height: auto;"/>
-        <input type="file" @change="onFileChange"/>
+        <input value="上传" type="file" @change="onFileChange"/>
+        <span>hello</span>
         
     </div>
 </template>
