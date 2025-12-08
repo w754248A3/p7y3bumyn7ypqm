@@ -26,6 +26,8 @@ import { ref } from 'vue';
 
 
     const textList = ref<Array<string>>([]);
+
+        const inputText = ref<string>('');
     getMessage();    
 </script>
 
@@ -37,10 +39,10 @@ import { ref } from 'vue';
         </div>
     </div>
     <div id="textInput">
-        <textarea>
+        <textarea v-model="inputText" >
 
         </textarea>
-        <button type="button" v-on:click="sendMessage('测试')">Send</button>
+        <button type="button" v-on:click="sendMessage(inputText)">Send</button>
     </div>
   </div>
 </template>
