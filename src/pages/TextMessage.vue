@@ -13,6 +13,15 @@ interface MessageType {
   type: TextType;
 }
 
+
+const TextType = {
+    TEXT:0,
+    IMAGE:1,
+} as const;
+
+type TextType = (typeof TextType)[keyof typeof TextType];
+
+
 const getMessage = async () => {
   const res = await fetch('/sql?app=TextMessage&action=getMessage', {
     method: 'GET',
@@ -46,20 +55,13 @@ const getMessage = async () => {
   scrollToBottom();
 };
 
-const TextType = {
-    TEXT:0,
-    IMAGE:1,
-} as const;
-
-type TextType = (typeof TextType)[keyof typeof TextType];
-
 
 const sendMessage = async (data:MessageType) => {
  
   await fetch('/sql?app=TextMessage&action=sendMessage', {
     method: 'POST',
     headers: {
-      'Content-Type': 'text/plain',
+      'Content-Type': 'application/json',
     },
     body: JSON.stringify(data),
   });
