@@ -59,7 +59,7 @@ const sendMessage = async (data:MessageType) => {
   await fetch('/sql?app=TextMessage&action=sendMessage', {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
+      'Content-Type': 'text/plain',
     },
     body: JSON.stringify(data),
   });

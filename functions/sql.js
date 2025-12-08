@@ -32,8 +32,7 @@ export const onRequestPost = async (context) => {
         const action = url.searchParams.get("action");
         const app = url.searchParams.get("app");
         if (app === "TextMessage" && action === "sendMessage") {
-            const req = await context.request.json();
-            const textMessage = req.text;
+            const textMessage = await context.request.text;
             const ps = context.env.database_name.prepare("INSERT INTO textMessageTable (text) VALUES (?)");
             const data = await ps.bind(textMessage).run();
             return Response.json({ message: "Message stored successfully", text: textMessage });
