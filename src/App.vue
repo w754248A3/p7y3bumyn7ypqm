@@ -2,6 +2,7 @@
 import { ref, shallowRef } from 'vue';
 import TextMessage from './pages/TextMessage.vue';
 import CameraView from './pages/CameraView.vue';
+import FileShared from './pages/FileShared.vue';
 
 // 定义页面配置接口
 interface PageConfig {
@@ -14,6 +15,7 @@ interface PageConfig {
 const pages: PageConfig[] = [
   { name: '文本消息', component: TextMessage, icon: '💬' },
   { name: '相机视图', component: CameraView, icon: '📷' },
+  { name: '文件共享', component: FileShared, icon: '📁' },
 ];
 
 if (!pages[0]) {
