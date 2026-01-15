@@ -110,6 +110,9 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 };
 
 
+function isString(s:any) {
+    return typeof(s) === 'string' || s instanceof String;
+}
 
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
@@ -128,7 +131,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
             const text = fd.get("text");
 
-            if ((text instanceof String) === false) {
+            if (!isString(text)) {
                 return createRes(false, "text type error", null);
 
             }
@@ -137,7 +140,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
             if (file) {
 
-                if ((file instanceof File) === false) {
+                if ((file instanceof File) === false || (file instanceof Blob) === false) {
                     return createRes(false, "file type error", null);
                 }
 

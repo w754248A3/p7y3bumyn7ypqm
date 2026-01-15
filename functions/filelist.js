@@ -66,6 +66,9 @@ export const onRequestGet = async (context) => {
         return createRes(false, "error", e);
     }
 };
+function isString(s) {
+    return typeof (s) === 'string' || s instanceof String;
+}
 export const onRequestPost = async (context) => {
     try {
         const url = new URL(context.request.url);
@@ -74,12 +77,12 @@ export const onRequestPost = async (context) => {
         if (app === "fileList" && action === "sendMessage") {
             const fd = await context.request.formData();
             const text = fd.get("text");
-            if ((text instanceof String) === false) {
+            if (!isString(text)) {
                 return createRes(false, "text type error", null);
             }
             const file = fd.get("file");
             if (file) {
-                if ((file instanceof File) === false) {
+                if ((file instanceof File) === false || (file instanceof Blob) === false) {
                     return createRes(false, "file type error", null);
                 }
                 const SPANCOUNT = 1 * 1024 * 1024 * 1.5;
