@@ -29,7 +29,7 @@ const getListData = async ()=>{
     console.log(resdata);
     if(resdata.isOK===false){
 
-        throw Error(resdata.message);
+        throw Error(JSON.stringify(resdata));
     }
 
     listViewDataRef.value= resdata.obj;
@@ -62,7 +62,7 @@ const onFileChange = async (event: Event) => {
 
     if(resData.isOK===false){
 
-        throw Error(resData.message);
+        throw Error(JSON.stringify(resData));
     }
     
     prompt("send ok");

@@ -105,7 +105,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     }
     catch (e) {
 
-        return createRes(false, "error", e);
+        console.log("exption", e);
+        return createRes(false, "exption", {json:JSON.stringify(e), mes:e.message});
     }
 };
 
@@ -223,7 +224,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
     }
     catch (e) {
-
-        return createRes(false, "exption", e);
+        console.log("exption", e);
+        return createRes(false, "exption", {json:JSON.stringify(e), mes:e.message});
     }
 };

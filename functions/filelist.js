@@ -63,7 +63,8 @@ export const onRequestGet = async (context) => {
         }
     }
     catch (e) {
-        return createRes(false, "error", e);
+        console.log("exption", e);
+        return createRes(false, "exption", { json: JSON.stringify(e), mes: e.message });
     }
 };
 function isString(s) {
@@ -127,6 +128,7 @@ export const onRequestPost = async (context) => {
         }
     }
     catch (e) {
-        return createRes(false, "exption", e);
+        console.log("exption", e);
+        return createRes(false, "exption", { json: JSON.stringify(e), mes: e.message });
     }
 };
