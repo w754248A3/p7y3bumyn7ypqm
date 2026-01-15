@@ -5,24 +5,62 @@ export const onRequestGet = async (context) => {
     // Create a prepared statement with our query
     try {
         const url = new URL(context.request.url);
-        const text = url.searchParams.get("text");
-        const sql = `
-                    WITH next_num AS (
-                        SELECT COALESCE(MAX(target), 0) + 1 AS v
-                        FROM main
-                    )
-                    INSERT INTO main(text, len, target)
-                    SELECT
-                        ?1,
-                        ?2,
-                        v
-                    FROM next_num
-                    RETURNING target, text, len;
-
-               `;
-        const ps = context.env.d1filelistdata.prepare(sql);
-        const data = await ps.bind(text || "null or unkw", 200).raw();
-        return createRes(true, "ok", data);
+        const action = url.searchParams.get("action");
+        const app = url.searchParams.get("app");
+        const target = url.searchParams.get("target");
+        if (app === "fileList" && action === "getMessage") {
+            if (target) {
+                if (target.length > 10) {
+                    return createRes(false, "target len > 10", target);
+                }
+                if (/^[0-9]+$/.test(target) === false) {
+                    return createRes(false, "target has not 0-9 char", target);
+                }
+                const targetN = Number.parseInt(target, 10);
+                if (Number.isNaN(targetN) || targetN === Infinity) {
+                    return createRes(false, "target is NAN or Infinity", target);
+                }
+                const sql = `SELECT data
+                            FROM filedata
+                            WHERE target = ?1
+                            ORDER BY id ASC; 
+                            `;
+                const ps = context.env.d1filelistdata.prepare(sql);
+                const data = await ps.bind(targetN).raw();
+                console.log("blob count", data.map(p => p[0].size));
+                if (data.length === 0) {
+                    return createRes(false, "target where data is 0", target);
+                }
+                const blobs = data.map(p => p[0]);
+                const combinedBlob = new Blob(blobs, {
+                    type: "application/octet-stream"
+                });
+                const response = new Response(combinedBlob, {
+                    headers: {
+                        "Content-Length": combinedBlob.size.toString()
+                    }
+                });
+                return response;
+            }
+            else {
+                const sql = `SELECT text, len, target
+                        FROM (
+                            SELECT *
+                            FROM main
+                            ORDER BY id DESC 
+                            LIMIT 100
+                        ) AS sub_query
+                        ORDER BY id ASC; 
+                        `;
+                const ps = context.env.d1filelistdata.prepare(sql);
+                const data = await ps.raw();
+                const obj = data.map(p => { return { text: p[0], len: p[1], target: p[2] }; });
+                return createRes(true, "ok", obj);
+            }
+        }
+        else {
+            return createRes(false, "No valid action specified", { path: context.functionPath, url: context.request.url, app: app, action: action });
+        }
     }
     catch (e) {
         return createRes(false, "error", e);
@@ -62,15 +100,23 @@ export const onRequestPost = async (context) => {
                `;
                 const ps = context.env.d1filelistdata.prepare(sql);
                 const data = await ps.bind(text, size).raw();
-                for (let start = 0, end = Math.min(SPANCOUNT, size - start); start <= size; end = Math.min(SPANCOUNT, size - start), start += end) {
-                    const spanFile = file.slice(start, end);
+                const target = data[0][0];
+                let start = 0;
+                while (start < size) {
+                    let spanCount = Math.min(SPANCOUNT, size - start);
+                    const spanFile = file.slice(start, start + spanCount);
+                    const sql = "INSERT INTO filedata(target, data) VALUES (?1, ?2)";
+                    const ps = context.env.d1filelistdata.prepare(sql);
+                    const d1res = await ps.bind(target, spanFile).run();
+                    console.log({ d1res, start, end: start + spanCount, size });
+                    start += spanCount;
                 }
-                file.size;
+                return createRes(true, "ok", target);
             }
             else {
                 const ps = context.env.d1filelistdata.prepare("INSERT INTO main (text) VALUES (?)");
-                await ps.bind(text).raw();
-                return createRes(true, "ok", text);
+                const d1res = await ps.bind(text).run();
+                return createRes(true, "ok", { d1res, text });
             }
         }
         else {
