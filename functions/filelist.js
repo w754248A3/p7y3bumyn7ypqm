@@ -30,15 +30,17 @@ export const onRequestGet = async (context) => {
                 if (data.length === 0) {
                     return createRes(false, "target where data is 0", target);
                 }
-                console.log(typeof data[0][0]);
-                console.log("blob count", data.map(p => p[0].length));
+                console.log(typeof data[0][0], Array.isArray(data[0][0]));
+                const size = data.map(p => p[0].length).reduce((partialSum, a) => partialSum + a, 0);
+                console.log("size", size, "count", data.length);
                 const u8as = data.map(p => Uint8Array.from(p));
                 const combinedBlob = new Blob(u8as, {
                     type: "application/octet-stream"
                 });
+                console.log("combinedBlob size", combinedBlob.size);
                 const response = new Response(combinedBlob, {
                     headers: {
-                        "Content-Length": combinedBlob.size.toString()
+                        "Content-Length": size.toString()
                     }
                 });
                 return response;
