@@ -50,15 +50,18 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 
 
 
-                const data = await ps.bind(targetN).raw<[Blob]>();
-                console.log("blob count", data.map(p => p[0].size));
+                const data = await ps.bind(targetN).raw<[Array<number>]>();
+                
                 if (data.length === 0) {
                     return createRes(false, "target where data is 0", target);
                 }
 
-                const blobs = data.map(p => p[0]);
+                console.log(typeof data[0][0]);
+                console.log("blob count", data.map(p => p[0].length));
 
-                const combinedBlob = new Blob(blobs, {
+                const u8as = data.map(p => Uint8Array.from(p));
+
+                const combinedBlob = new Blob(u8as, {
                     type: "application/octet-stream"
                 });
 
@@ -187,11 +190,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
 
                     const spanFile = file.slice(start, start + spanCount);
-
+                    const ab = await spanFile.arrayBuffer();
                     const sql = "INSERT INTO filedata(target, data) VALUES (?1, ?2)";
 
                     const ps = context.env.d1filelistdata.prepare(sql);
-                    const d1res = await ps.bind(target, spanFile).run();
+                    const d1res = await ps.bind(target, ab).run();
 
                     console.log({ d1res, start, end: start + spanCount, size });
 
