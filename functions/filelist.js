@@ -33,7 +33,7 @@ export const onRequestGet = async (context) => {
                 console.log(typeof data[0][0], Array.isArray(data[0][0]));
                 const size = data.map(p => p[0].length).reduce((partialSum, a) => partialSum + a, 0);
                 console.log("size", size, "count", data.length);
-                const u8as = data.map(p => Uint8Array.from(p));
+                const u8as = data.map(p => Uint8Array.from(p[0]));
                 const combinedBlob = new Blob(u8as, {
                     type: "application/octet-stream"
                 });
