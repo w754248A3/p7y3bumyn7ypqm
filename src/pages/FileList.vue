@@ -91,7 +91,7 @@ const onFileChange = async (event: Event) => {
     </div>
     <div>
         <input type="button" v-on:click="getListData" value="load">
-        <input type="file" accept="image/*" @change="onFileChange" value="sel file">
+        <input type="file" accept="image/*" @change="onFileChange">
 
     </div>
   </div>
