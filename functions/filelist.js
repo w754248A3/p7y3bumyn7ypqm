@@ -136,3 +136,23 @@ export const onRequestPost = async (context) => {
         return createRes(false, "exption", { json: JSON.stringify(e), mes: e.message });
     }
 };
+export const onRequestDelete = async (context) => {
+    try {
+        const url = new URL(context.request.url);
+        const action = url.searchParams.get("action");
+        const app = url.searchParams.get("app");
+        if (app === "fileList" && action === "deleteMessage") {
+            const del_main = context.env.d1filelistdata.prepare("DELETE FROM main;");
+            const del_filedata = context.env.d1filelistdata.prepare("DELETE FROM filedata;");
+            const res = await context.env.d1filelistdata.batch([del_main, del_filedata]);
+            return createRes(true, "ok", res);
+        }
+        else {
+            return createRes(false, "No valid action specified", { path: context.functionPath, url: context.request.url, app: app, action: action });
+        }
+    }
+    catch (e) {
+        console.log("exption", e);
+        return createRes(false, "exption", { json: JSON.stringify(e), mes: e.message });
+    }
+};
