@@ -27,6 +27,8 @@ const errorlog = ref<string>("");
 
 const imgUrl = "/filelist?action=getMessage&app=fileList&target=";
 
+const text_value = ref<string>("");
+
 const getListData = async ()=>{
 
 
@@ -49,6 +51,8 @@ const getListData = async ()=>{
 
 
 function postWithProgress(url:string, formData:FormData, onProgress:(v:number)=> void) {
+  
+  is_progress.value=true;
   return new Promise<any>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", url);
@@ -82,7 +86,32 @@ function postWithProgress(url:string, formData:FormData, onProgress:(v:number)=>
 }
 
 
+const postText = async()=>{
 
+    const text = text_value.value;
+    if(!text){
+      errorlog.value+="\n"+ "text not have text";
+      return;
+    }
+
+
+    const fd = new FormData();
+
+    fd.append("text", text);
+
+
+
+    const resData:ResData = await postWithProgress("/filelist?action=sendMessage&app=fileList", fd, (n)=>{
+        progress.value= n;
+    });
+
+    if(resData.isOK===false){
+
+        const e = "postText  error:"+ JSON.stringify(resData);
+        errorlog.value+="\n"+ e;
+        throw Error(e);
+    }
+};
 
 
 const onFileChange = async (event: Event) => {
@@ -106,7 +135,7 @@ const onFileChange = async (event: Event) => {
 
     if(resData.isOK===false){
 
-        const e = "getlistdata error:"+ JSON.stringify(resData);
+        const e = "post file error:"+ JSON.stringify(resData);
         errorlog.value+="\n"+ e;
         throw Error(e);
     }
@@ -152,6 +181,8 @@ const deleteData=async()=>{
     </div>
     <div>
       <label v-if="is_progress">{{ progress }}</label>
+        <input type="text" :value="text_value">
+        <input type="button" v-on:click="postText" value="post text">
         <input type="button" v-on:click="getListData" value="load">
         <input type="file" accept="image/*" @change="onFileChange">
         <input type="button" v-on:click="deleteData" value="delete">
