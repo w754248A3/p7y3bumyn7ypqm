@@ -1,203 +1,1241 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, nextTick, onMounted, watch } from 'vue';
 
-
-interface ResData{
-    isOK:boolean;
-    message:string;
-    obj:any;
+interface ResData {
+  isOK: boolean;
+  message: string;
+  obj: any;
 }
 
+interface ListData {
+  text: string;
+  len: number | null;
+  target: number | null;
+  imgLoaded?: boolean;
+  imgSrc?: string;
+  imgBlob?: Blob;
+  imgFileName?: string;
+}
 
-
-interface ListData{
-    text:string;
-    len:number;
-    target:number;
-    imgView:boolean;
+interface MessageItem {
+  id: number;
+  text: string;
+  isImage: boolean;
+  imageUrl?: string;
+  imageBlob?: Blob;
+  fileName?: string;
+  timestamp?: string;
+  isSent?: boolean;
+  imgLoaded?:boolean;
 }
 
 const progress = ref<number>(0);
-
-const is_progress= ref<boolean>(false);
-
-const listViewDataRef = ref<ListData[]>();
-
-const errorlog = ref<string>("");
+const is_progress = ref<boolean>(false);
+const listViewDataRef = ref<ListData[]>([]);
+const errorMessage = ref<string>("");
+const showErrorModal = ref<boolean>(false);
+const showImageModal = ref<boolean>(false);
+const modalImageUrl = ref<string>("");
+const modalImageFileName = ref<string>("");
+const text_value = ref<string>("");
+const messagesContainer = ref<HTMLElement | null>(null);
+const fileInputRef = ref<HTMLInputElement | null>(null);
+const messages = ref<MessageItem[]>([]);
 
 const imgUrl = "/filelist?action=getMessage&app=fileList&target=";
 
-const text_value = ref<string>("");
-
-const getListData = async ()=>{
-
-
-   const res = await fetch("/filelist?action=getMessage&app=fileList");
-
-
-    const resdata : ResData = (await res.json());
-    console.log(resdata);
-    if(resdata.isOK===false){
-
-        const e = "getlistdata error:"+ JSON.stringify(resdata);
-        errorlog.value+="\n"+ e;
-        throw Error(e);
-    }
-
-    listViewDataRef.value= resdata.obj;
-
+// 显示错误模态窗口
+const showError = (error: string) => {
+  errorMessage.value = error;
+  showErrorModal.value = true;
 };
 
+// 关闭错误模态窗口
+const closeErrorModal = () => {
+  showErrorModal.value = false;
+  errorMessage.value = "";
+};
 
+// 显示图片模态窗口
+const showImagePreview = (imageUrl: string, fileName: string) => {
+  modalImageUrl.value = imageUrl;
+  modalImageFileName.value = fileName;
+  showImageModal.value = true;
+};
 
-function postWithProgress(url:string, formData:FormData, onProgress:(v:number)=> void) {
+// 关闭图片模态窗口
+const closeImageModal = () => {
+  showImageModal.value = false;
+  modalImageUrl.value = "";
+  modalImageFileName.value = "";
+};
+
+// 滚动到底部
+const scrollToBottom = () => {
+  if (messagesContainer.value) {
+    messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
+  }
+};
+
+// 监听消息列表变化，自动滚动到底部
+watch(messages, () => {
+  nextTick(() => {
+    scrollToBottom();
+  });
+}, { deep: true });
+
+// 加载图片
+const loadImage = async (item: MessageItem) => {
+  if (item.imgLoaded || !item.isImage || !item.fileName) return;
   
-  is_progress.value=true;
-  return new Promise<any>((resolve, reject) => {
+  try {
+    const target = listViewDataRef.value.find(p => p.text === item.fileName && p.target !== null && p.target !== undefined)?.target;
+    if (target === null || target === undefined) return;
+
+    const response = await fetch(imgUrl + target);
+    if (!response.ok) {
+      throw new Error(`加载图片失败: HTTP ${response.status}`);
+    }
+    
+    const blob = await response.blob();
+    // 创建带有文件名的blob
+    const fileName = item.fileName || 'image';
+    const file = new File([blob], fileName, { type: blob.type });
+    const url = URL.createObjectURL(file);
+    
+    // 更新消息项
+    const msgIndex = messages.value.findIndex(m => m.id === item.id);
+    if (msgIndex !== -1) {
+
+      const v = messages.value[msgIndex];
+
+      if(!v){
+         console.log("messages.value[msgIndex] is false");
+        return;
+      }
+      v.imgLoaded = true;
+          v.imageUrl = url;
+          v.imageBlob = file;
+      
+    }
+    
+    // 更新列表数据
+    const listIndex = listViewDataRef.value.findIndex(p => p.text === item.fileName && p.target === target);
+    if (listIndex !== -1) {
+
+      const v = listViewDataRef.value[listIndex];
+
+      if(!v){
+        console.log("listViewDataRef.value[listIndex] is false");
+        return;
+      }
+      v.imgLoaded = true;
+      v.imgSrc = url;
+      v.imgBlob = file;
+      v.imgFileName = fileName;
+    }
+  } catch (error) {
+    showError(`加载图片失败: ${error instanceof Error ? error.message : String(error)}`);
+  }
+};
+
+// 点击图片显示模态窗口
+const handleImageClick = (item: MessageItem) => {
+  if (item.imageUrl && item.fileName) {
+    showImagePreview(item.imageUrl, item.fileName);
+  }
+};
+
+// 下载图片
+const downloadImage = (imageUrl: string, fileName: string) => {
+  const link = document.createElement('a');
+  link.href = imageUrl;
+  link.download = fileName;
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+};
+
+// 获取列表数据
+const getListData = async () => {
+  try {
+    const res = await fetch("/filelist?action=getMessage&app=fileList");
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+
+    const resdata: ResData = await res.json();
+    console.log(resdata);
+    
+    if (resdata.isOK === false) {
+      const e = "获取消息列表失败: " + JSON.stringify(resdata);
+      showError(e);
+      return;
+    }
+
+    listViewDataRef.value = resdata.obj || [];
+    
+    // 转换为消息格式
+    messages.value = listViewDataRef.value.map((item, index) => {
+      const isImage = item.target !== null && item.len !== null && 
+                     item.target !== undefined && item.len !== undefined &&
+                     typeof item.target === 'number' && typeof item.len === 'number';
+      return {
+        id: index,
+        text: item.text || '',
+        isImage: isImage,
+        imageUrl: item.imgSrc,
+        imageBlob: item.imgBlob,
+        fileName: isImage ? (item.text || 'image') : undefined,
+        timestamp: new Date().toLocaleTimeString(),
+        isSent: index % 2 === 0,
+        imgLoaded: item.imgLoaded || false,
+      };
+    });
+  } catch (error) {
+    showError(`获取消息列表失败: ${error instanceof Error ? error.message : String(error)}`);
+  }
+};
+
+// 上传文件（带进度）
+function postWithProgress(url: string, formData: FormData, onProgress: (v: number) => void) {
+  is_progress.value = true;
+  progress.value = 0;
+  
+  return new Promise<ResData>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", url);
     xhr.responseType = "json";
 
     xhr.upload.onprogress = e => {
       if (e.lengthComputable) {
-        onProgress((e.loaded / e.total * 100));
+        const percent = (e.loaded / e.total * 100);
+        onProgress(percent);
       }
     };
 
     xhr.onload = () => {
+      is_progress.value = false;
       if (xhr.status >= 200 && xhr.status < 300) {
-
-        if(!(xhr.response)){
-            reject(new Error("HTTP res is null"));
+        if (!xhr.response) {
+          reject(new Error("HTTP 响应为空"));
+        } else {
+          resolve(xhr.response);
         }
-        else{
-            resolve(xhr.response);
-        }
-        
       } else {
-        reject(new Error("HTTP " + xhr.status));
+        reject(new Error(`HTTP ${xhr.status}`));
       }
     };
 
-    xhr.onerror = () => reject(new Error("network error"));
+    xhr.onerror = () => {
+      is_progress.value = false;
+      reject(new Error("网络错误"));
+    };
 
     xhr.send(formData);
   });
 }
 
+// 发送文本
+const postText = async () => {
+  const text = text_value.value.trim();
+  if (!text) {
+    showError("文本内容不能为空");
+    return;
+  }
 
-const postText = async()=>{
+  try {
+    const fd = new FormData();
+    fd.append("text", text);
 
-    const text = text_value.value;
-    if(!text){
-      errorlog.value+="\n"+ "text not have text";
+    const resData: ResData = await postWithProgress("/filelist?action=sendMessage&app=fileList", fd, (n) => {
+      progress.value = n;
+    });
+
+    if (resData.isOK === false) {
+      const e = "发送文本失败: " + JSON.stringify(resData);
+      showError(e);
       return;
     }
 
-
-    const fd = new FormData();
-
-    fd.append("text", text);
-
-
-
-    const resData:ResData = await postWithProgress("/filelist?action=sendMessage&app=fileList", fd, (n)=>{
-        progress.value= n;
-    });
-
-    if(resData.isOK===false){
-
-        const e = "postText  error:"+ JSON.stringify(resData);
-        errorlog.value+="\n"+ e;
-        throw Error(e);
-    }
-    else{
-      getListData();
-    }
+    text_value.value = "";
+    await getListData();
+  } catch (error) {
+    showError(`发送文本失败: ${error instanceof Error ? error.message : String(error)}`);
+  }
 };
 
-
+// 文件选择处理
 const onFileChange = async (event: Event) => {
   const input = event.target as HTMLInputElement;
   if (input.files && input.files[0]) {
+    const file = input.files[0];
 
-    const file = input.files[0]
-    
-
-    const fd = new FormData();
-
-    fd.append("text", file.name);
-
-    fd.append("file", file);
-
-
-
-    const resData:ResData = await postWithProgress("/filelist?action=sendMessage&app=fileList", fd, (n)=>{
-        progress.value= n;
-    });
-
-    if(resData.isOK===false){
-
-        const e = "post file error:"+ JSON.stringify(resData);
-        errorlog.value+="\n"+ e;
-        throw Error(e);
+    // 检查是否是图片
+    if (!file.type.startsWith('image/')) {
+      showError("请选择图片文件");
+      input.value = "";
+      return;
     }
-    else{
-      getListData();
+
+    try {
+      const fd = new FormData();
+      fd.append("text", file.name);
+      fd.append("file", file);
+
+      const resData: ResData = await postWithProgress("/filelist?action=sendMessage&app=fileList", fd, (n) => {
+        progress.value = n;
+      });
+
+      if (resData.isOK === false) {
+        const e = "上传文件失败: " + JSON.stringify(resData);
+        showError(e);
+        return;
+      }
+
+      // 清空文件输入
+      if (input) {
+        input.value = "";
+      }
+      await getListData();
+    } catch (error) {
+      showError(`上传文件失败: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 };
 
-
-const deleteData=async()=>{
-    const res = await fetch("/filelist?action=deleteMessage&app=fileList", {
-      method:"DELETE"
-    });
-    const resdata : ResData = (await res.json());
-    console.log(resdata);
-    if(resdata.isOK===false){
-
-        const e = "deleteData error:"+ JSON.stringify(resdata);
-        errorlog.value+="\n"+ e;
-        throw Error(e);
-    }
-    else{
-      getListData();
-    }
-
+// 触发文件选择
+const triggerFileSelect = () => {
+  if (fileInputRef.value) {
+    fileInputRef.value.click();
+  }
 };
 
+// 删除所有数据
+const deleteData = async () => {
+  if (!confirm("确定要删除所有消息吗？")) {
+    return;
+  }
 
+  try {
+    const res = await fetch("/filelist?action=deleteMessage&app=fileList", {
+      method: "DELETE"
+    });
+    
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    
+    const resdata: ResData = await res.json();
+    console.log(resdata);
+    
+    if (resdata.isOK === false) {
+      const e = "删除消息失败: " + JSON.stringify(resdata);
+      showError(e);
+      return;
+    }
+
+    await getListData();
+  } catch (error) {
+    showError(`删除消息失败: ${error instanceof Error ? error.message : String(error)}`);
+  }
+};
+
+// 回车发送消息（Shift+Enter换行）
+const handleKeyDown = (event: KeyboardEvent) => {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    postText();
+  }
+};
+
+// 处理输入框聚焦
+const handleInputFocus = () => {
+  setTimeout(() => {
+    if (messagesContainer.value) {
+      scrollToBottom();
+    }
+  }, 300);
+};
+
+onMounted(() => {
+  getListData();
+});
 </script>
 
 <template>
-  <div>
-    <div>
-        {{ errorlog }}
-    </div>
-    <div>
-        <div v-for="p in listViewDataRef">
-        <div v-if="p.target">
-            <img v-if="p.imgView" :src="imgUrl+p.target">
-            <p>{{ p.text + ":" +p.len }}</p>
-            <input type="button" v-on:click="p.imgView= true" value="load img">
+  <div class="chat-container">
+    <!-- 聊天消息区域 -->
+    <div class="messages-wrapper" ref="messagesContainer">
+      <div class="messages-container">
+        <div
+          v-for="(message, index) in messages"
+          :key="message.id || index"
+          :class="['message', message.isSent ? 'message-sent' : 'message-received']"
+        >
+          <div class="message-bubble">
+            <!-- 文本消息 -->
+            <p v-if="!message.isImage" class="message-text">{{ message.text }}</p>
+            
+            <!-- 图片消息 -->
+            <div v-else class="image-message">
+              <div class="image-info">
+                <p class="image-filename">{{ message.fileName }}</p>
+                <span class="message-time">{{ message.timestamp || '刚刚' }}</span>
+              </div>
+              
+              <!-- 未加载时显示占位符 -->
+              <div v-if="!message.imgLoaded" class="image-placeholder" @click="loadImage(message)">
+                <div class="placeholder-content">
+                  <span class="placeholder-icon">🖼️</span>
+                  <span class="placeholder-text">点击加载图片</span>
+                </div>
+              </div>
+              
+              <!-- 已加载的图片 -->
+              <div v-else-if="message.imageUrl" class="image-container">
+                <img
+                  :src="message.imageUrl"
+                  :alt="message.fileName || '图片'"
+                  :title="message.fileName || '图片'"
+                  class="message-image"
+                  @click="handleImageClick(message)"
+                  @error="() => showError('图片加载失败')"
+                />
+              </div>
+              
+              <!-- 加载失败的情况 -->
+              <div v-else class="image-placeholder error-placeholder">
+                <div class="placeholder-content">
+                  <span class="placeholder-icon">❌</span>
+                  <span class="placeholder-text">加载失败</span>
+                </div>
+              </div>
+            </div>
+            
+            <!-- 文本消息的时间戳 -->
+            <span v-if="!message.isImage" class="message-time">{{ message.timestamp || '刚刚' }}</span>
+          </div>
         </div>
-
-        <div v-if="!p.target"></div>
-            <p>{{ p.text }}</p>
+        
+        <div v-if="messages.length === 0" class="empty-state">
+          <p>还没有消息，开始聊天吧！</p>
         </div>
+      </div>
     </div>
-    <div>
-      <label v-if="is_progress">{{ progress }}</label>
-        <input type="text" v-bind:value="text_value">
-        <input type="button" v-on:click="postText" value="post text">
-        <input type="button" v-on:click="getListData" value="load">
-        <input type="file" accept="image/*" @change="onFileChange">
-        <input type="button" v-on:click="deleteData" value="delete">
 
+    <!-- 上传进度条 -->
+    <div v-if="is_progress" class="progress-container">
+      <div class="progress-bar">
+        <div class="progress-fill" :style="{ width: progress + '%' }"></div>
+      </div>
+      <span class="progress-text">{{ Math.round(progress) }}%</span>
+    </div>
+
+    <!-- 输入区域 -->
+    <div class="input-container">
+      <div class="input-wrapper">
+        <textarea
+          v-model="text_value"
+          class="message-input"
+          placeholder="输入消息... (Shift+Enter 换行)"
+          rows="1"
+          @keydown="handleKeyDown"
+          @focus="handleInputFocus"
+          @input="(e) => {
+            const target = e.target as HTMLTextAreaElement;
+            target.style.height = 'auto';
+            target.style.height = Math.min(target.scrollHeight, 120) + 'px';
+          }"
+        ></textarea>
+        
+        <input
+          ref="fileInputRef"
+          type="file"
+          accept="image/*"
+          @change="onFileChange"
+          style="display: none;"
+        />
+        
+        <button
+          type="button"
+          class="action-button image-button"
+          @click="triggerFileSelect"
+          title="选择图片"
+        >
+          <span class="button-icon">📷</span>
+        </button>
+        
+        <button
+          type="button"
+          class="send-button"
+          @click="postText"
+          :disabled="!text_value.trim()"
+        >
+          <span class="send-icon">📤</span>
+                  <span class="send-text">发送</span>
+        </button>
+        
+        <button
+          type="button"
+          class="action-button refresh-button"
+          @click="getListData"
+          title="刷新消息"
+        >
+          <span class="button-icon">🔄</span>
+        </button>
+        
+        <button
+          type="button"
+          class="action-button delete-button"
+          @click="deleteData"
+          title="删除所有消息"
+        >
+          <span class="button-icon">🗑️</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 错误模态窗口 -->
+    <div v-if="showErrorModal" class="modal-overlay" @click="closeErrorModal">
+      <div class="modal-content error-modal" @click.stop>
+        <div class="modal-header">
+          <h3>错误</h3>
+          <button class="modal-close" @click="closeErrorModal">×</button>
+        </div>
+        <div class="modal-body">
+          <p>{{ errorMessage }}</p>
+        </div>
+        <div class="modal-footer">
+          <button class="modal-button" @click="closeErrorModal">确定</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 图片预览模态窗口 -->
+    <div v-if="showImageModal" class="modal-overlay" @click="closeImageModal">
+      <div class="modal-content image-modal" @click.stop>
+        <div class="modal-header">
+          <h3>{{ modalImageFileName }}</h3>
+          <div class="modal-actions">
+            <button
+              class="modal-button download-button"
+              @click="downloadImage(modalImageUrl, modalImageFileName)"
+              title="下载图片"
+            >
+              <span class="download-icon">💾</span>
+              <span class="download-text">下载</span>
+            </button>
+            <button class="modal-close" @click="closeImageModal">×</button>
+          </div>
+        </div>
+        <div class="modal-body image-modal-body">
+          <img
+            :src="modalImageUrl"
+            :alt="modalImageFileName"
+            :title="modalImageFileName"
+            class="modal-image"
+            @click.stop
+          />
+        </div>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
+.chat-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background: #f0f2f5;
+  overflow: hidden;
+}
+
+.messages-wrapper {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 20px;
+  background: linear-gradient(to bottom, #e5ddd5 0%, #e5ddd5 50%, #d2d2d2 100%);
+  background-image: 
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0, 0, 0, 0.03) 2px,
+      rgba(0, 0, 0, 0.03) 4px
+    );
+  -webkit-overflow-scrolling: touch;
+}
+
+.messages-container {
+  max-width: 800px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.message {
+  display: flex;
+  animation: fadeIn 0.3s ease-in;
+}
+
+.message-sent {
+  justify-content: flex-end;
+}
+
+.message-received {
+  justify-content: flex-start;
+}
+
+.message-bubble {
+  max-width: 70%;
+  padding: 12px 16px;
+  border-radius: 18px;
+  position: relative;
+  word-wrap: break-word;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.message-sent .message-bubble {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-bottom-right-radius: 4px;
+}
+
+.message-received .message-bubble {
+  background: white;
+  color: #333;
+  border-bottom-left-radius: 4px;
+}
+
+.message-text {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.message-time {
+  display: block;
+  font-size: 11px;
+  opacity: 0.7;
+  margin-top: 4px;
+  text-align: right;
+}
+
+.message-received .message-time {
+  text-align: left;
+}
+
+.image-message {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.image-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.image-filename {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  word-break: break-word;
+}
+
+.image-placeholder {
+  width: 200px;
+  height: 150px;
+  border: 2px dashed rgba(255, 255, 255, 0.5);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.message-received .image-placeholder {
+  border-color: rgba(0, 0, 0, 0.2);
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.image-placeholder:hover {
+  background: rgba(255, 255, 255, 0.2);
+  transform: scale(1.02);
+}
+
+.message-received .image-placeholder:hover {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.error-placeholder {
+  border-color: rgba(255, 0, 0, 0.3);
+  background: rgba(255, 0, 0, 0.05);
+  cursor: default;
+}
+
+.error-placeholder:hover {
+  transform: none;
+}
+
+.placeholder-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  opacity: 0.7;
+}
+
+.placeholder-icon {
+  font-size: 32px;
+}
+
+.placeholder-text {
+  font-size: 12px;
+}
+
+.image-container {
+  max-width: 300px;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.image-container:hover {
+  transform: scale(1.02);
+}
+
+.message-image {
+  width: 100%;
+  height: auto;
+  max-height: 300px;
+  object-fit: contain;
+  display: block;
+  border-radius: 8px;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: #999;
+  font-size: 14px;
+}
+
+.progress-container {
+  background: white;
+  border-top: 1px solid #e0e0e0;
+  padding: 8px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.progress-bar {
+  flex: 1;
+  height: 6px;
+  background: #e0e0e0;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  transition: width 0.3s ease;
+}
+
+.progress-text {
+  font-size: 12px;
+  color: #666;
+  min-width: 40px;
+  text-align: right;
+}
+
+.input-container {
+  background: white;
+  border-top: 1px solid #e0e0e0;
+  padding: 15px 20px;
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.05);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 10;
+}
+
+.input-wrapper {
+  max-width: 800px;
+  margin: 0 auto;
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.message-input {
+  flex: 1;
+  padding: 12px 16px;
+  border: 2px solid #e0e0e0;
+  border-radius: 24px;
+  font-size: 15px;
+  font-family: inherit;
+  resize: none;
+  outline: none;
+  transition: all 0.3s ease;
+  max-height: 120px;
+  overflow-y: auto;
+  background: #f8f9fa;
+  color: #333;
+  line-height: 1.5;
+}
+
+.message-input:focus {
+  border-color: #667eea;
+  background: white;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.message-input::placeholder {
+  color: #999;
+  opacity: 1;
+}
+
+.action-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 2px solid #e0e0e0;
+  border-radius: 50%;
+  background: #f8f9fa;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  flex-shrink: 0;
+}
+
+.action-button:hover {
+  border-color: #667eea;
+  background: white;
+  transform: translateY(-2px);
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
+}
+
+.action-button .button-icon {
+  font-size: 20px;
+}
+
+.send-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 24px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 24px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.send-button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.send-button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.send-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.send-icon {
+  font-size: 16px;
+}
+
+.send-text {
+  font-size: 15px;
+}
+
+/* 模态窗口样式 */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease;
+}
+
+.modal-content {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  max-width: 90vw;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  animation: slideUp 0.3s ease;
+}
+
+.error-modal {
+  max-width: 500px;
+  width: 90%;
+}
+
+.image-modal {
+  max-width: 95vw;
+  max-height: 95vh;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px;
+  border-bottom: 1px solid #e0e0e0;
+  gap: 12px;
+}
+
+.modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #333;
+}
+
+.download-button {
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.download-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.download-icon {
+  font-size: 16px;
+}
+
+.download-text {
+  font-size: 14px;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 28px;
+  color: #999;
+  cursor: pointer;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.modal-close:hover {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.error-modal .modal-body {
+  max-height: 400px;
+}
+
+.image-modal-body {
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+  max-height: calc(95vh - 80px);
+}
+
+.modal-image {
+  max-width: 100%;
+  max-height: calc(95vh - 80px);
+  object-fit: contain;
+  display: block;
+}
+
+.modal-footer {
+  padding: 15px 20px;
+  border-top: 1px solid #e0e0e0;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.modal-button {
+  padding: 10px 24px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.modal-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 移动端响应式 */
+@media (max-width: 768px) {
+  .chat-container {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .messages-wrapper {
+    padding: 15px 12px;
+    min-height: 0;
+    flex: 1 1 auto;
+  }
+
+  .message-bubble {
+    max-width: 85%;
+    padding: 10px 14px;
+  }
+
+  .message-text {
+    font-size: 14px;
+  }
+
+  .image-placeholder {
+    width: 150px;
+    height: 120px;
+  }
+
+  .image-container {
+    max-width: 250px;
+  }
+
+  .message-image {
+    max-height: 250px;
+  }
+
+  .input-container {
+    padding: 12px 15px;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .input-wrapper {
+    gap: 6px;
+  }
+
+  .message-input {
+    padding: 10px 14px;
+    font-size: 14px;
+  }
+
+  .action-button {
+    width: 40px;
+    height: 40px;
+  }
+
+  .action-button .button-icon {
+    font-size: 18px;
+  }
+
+  .send-button {
+    padding: 10px 20px;
+    font-size: 14px;
+  }
+
+  .send-text {
+    display: none;
+  }
+
+  .send-icon {
+    font-size: 18px;
+  }
+  
+  .download-text {
+    display: none;
+  }
+  
+  .download-icon {
+    font-size: 18px;
+  }
+}
+
+@media (max-width: 480px) {
+  .chat-container {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .messages-wrapper {
+    padding: 12px 10px;
+    min-height: 0;
+    flex: 1 1 auto;
+  }
+
+  .message-bubble {
+    max-width: 90%;
+    padding: 8px 12px;
+  }
+
+  .message-text {
+    font-size: 13px;
+  }
+
+  .message-time {
+    font-size: 10px;
+  }
+
+  .image-placeholder {
+    width: 120px;
+    height: 100px;
+  }
+
+  .placeholder-icon {
+    font-size: 24px;
+  }
+
+  .placeholder-text {
+    font-size: 10px;
+  }
+
+  .image-container {
+    max-width: 200px;
+  }
+
+  .message-image {
+    max-height: 200px;
+  }
+
+  .input-container {
+    padding: 10px 12px;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  }
+
+  .input-wrapper {
+    gap: 4px;
+  }
+
+  .message-input {
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+
+  .action-button {
+    width: 36px;
+    height: 36px;
+  }
+
+  .action-button .button-icon {
+    font-size: 16px;
+  }
+
+  .send-button {
+    padding: 8px 16px;
+    min-width: 44px;
+  }
+  
+  .download-text {
+    display: none;
+  }
+  
+  .download-button {
+    padding: 6px 12px;
+  }
+  
+  .download-icon {
+    font-size: 16px;
+  }
+}
+
+/* 滚动条样式 */
+.messages-wrapper::-webkit-scrollbar {
+  width: 6px;
+}
+
+.messages-wrapper::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.messages-wrapper::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 3px;
+}
+
+.messages-wrapper::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.3);
+}
 </style>

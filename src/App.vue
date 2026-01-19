@@ -3,6 +3,7 @@ import { ref, shallowRef } from 'vue';
 import TextMessage from './pages/TextMessage.vue';
 import CameraView from './pages/CameraView.vue';
 import FileShared from './pages/FileShared.vue';
+import FileList from './pages/FileList.vue';
 
 // 定义页面配置接口
 interface PageConfig {
