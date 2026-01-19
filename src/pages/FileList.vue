@@ -88,6 +88,15 @@ watch(messages, () => {
 const loadImage = async (item: MessageItem) => {
   if (item.imgLoaded || !item.isImage || !item.fileName) return;
   
+  // 记录加载前的滚动状态，防止图片加载后导致滚动跳跃
+  const container = messagesContainer.value;
+  if (!container) return;
+  
+  const scrollHeightBefore = container.scrollHeight;
+  const scrollTopBefore = container.scrollTop;
+  const clientHeightBefore = container.clientHeight;
+  const isNearBottom = scrollHeightBefore - scrollTopBefore - clientHeightBefore < 50; // 50px阈值
+  
   try {
     const target = listViewDataRef.value.find(p => p.text === item.fileName && p.target !== null && p.target !== undefined)?.target;
     if (target === null || target === undefined) return;
@@ -114,8 +123,8 @@ const loadImage = async (item: MessageItem) => {
         return;
       }
       v.imgLoaded = true;
-          v.imageUrl = url;
-          v.imageBlob = file;
+      v.imageUrl = url;
+      v.imageBlob = file;
       
     }
     
@@ -133,6 +142,22 @@ const loadImage = async (item: MessageItem) => {
       v.imgSrc = url;
       v.imgBlob = file;
       v.imgFileName = fileName;
+    }
+    
+    // 等待DOM更新后调整滚动位置
+    await nextTick();
+    
+    if (container) {
+      const scrollHeightAfter = container.scrollHeight;
+      const heightDiff = scrollHeightAfter - scrollHeightBefore;
+      
+      if (isNearBottom) {
+        // 如果之前在底部附近，保持滚动到底部
+        scrollToBottom();
+      } else if (heightDiff > 0) {
+        // 如果不在底部，增加滚动位置以保持视觉位置
+        container.scrollTop = scrollTopBefore + heightDiff;
+      }
     }
   } catch (error) {
     showError(`加载图片失败: ${error instanceof Error ? error.message : String(error)}`);
@@ -157,6 +182,42 @@ const downloadImage = (imageUrl: string, fileName: string) => {
   document.body.removeChild(link);
 };
 
+// 将 ListData 转换为 MessageItem
+const convertListDataToMessage = (item: ListData, index: number): MessageItem => {
+  const isImage = item.target !== null && item.len !== null && 
+                 item.target !== undefined && item.len !== undefined &&
+                 typeof item.target === 'number' && typeof item.len === 'number';
+  return {
+    id: index,
+    text: item.text || '',
+    isImage: isImage,
+    imageUrl: item.imgSrc,
+    imageBlob: item.imgBlob,
+    fileName: isImage ? (item.text || 'image') : undefined,
+    timestamp: new Date().toLocaleTimeString(),
+    isSent: index % 2 === 0,
+    imgLoaded: item.imgLoaded || false,
+  };
+};
+
+// 添加新消息到列表
+const addMessageToList = (data: ListData) => {
+  // 添加到 listViewDataRef
+  listViewDataRef.value.push(data);
+  
+  // 计算新的索引
+  const newIndex = listViewDataRef.value.length - 1;
+  
+  // 转换为消息并添加到 messages
+  const newMessage = convertListDataToMessage(data, newIndex);
+  messages.value.push(newMessage);
+  
+  // 滚动到底部
+  nextTick(() => {
+    scrollToBottom();
+  });
+};
+
 // 获取列表数据
 const getListData = async () => {
   try {
@@ -178,20 +239,7 @@ const getListData = async () => {
     
     // 转换为消息格式
     messages.value = listViewDataRef.value.map((item, index) => {
-      const isImage = item.target !== null && item.len !== null && 
-                     item.target !== undefined && item.len !== undefined &&
-                     typeof item.target === 'number' && typeof item.len === 'number';
-      return {
-        id: index,
-        text: item.text || '',
-        isImage: isImage,
-        imageUrl: item.imgSrc,
-        imageBlob: item.imgBlob,
-        fileName: isImage ? (item.text || 'image') : undefined,
-        timestamp: new Date().toLocaleTimeString(),
-        isSent: index % 2 === 0,
-        imgLoaded: item.imgLoaded || false,
-      };
+      return convertListDataToMessage(item, index);
     });
   } catch (error) {
     showError(`获取消息列表失败: ${error instanceof Error ? error.message : String(error)}`);
@@ -258,15 +306,18 @@ const postText = async () => {
       showError(e);
       return;
     }
-    else{
-      //返回的数据只有text,len,target
-      //根据返回的内容更新ui就不需要每次都调用getListData
-        const data:ListData = resData.obj;
-        console.log(data);
-      }
+    
+    // 返回的数据只有text,len,target
+    // 根据返回的内容更新ui就不需要每次都调用getListData
+    const data: ListData = resData.obj;
+    if (data) {
+      console.log(data);
+      // 初始化数据
+      data.imgLoaded = false;
+      addMessageToList(data);
+    }
 
     text_value.value = "";
-    await getListData();
   } catch (error) {
     showError(`发送文本失败: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -299,17 +350,21 @@ const onFileChange = async (event: Event) => {
         showError(e);
         return;
       }
-      else{
-      //返回的数据只有text,len,target
-      //根据返回的内容更新ui就不需要每次都调用getListData
-        const data:ListData = resData.obj;
+      
+      // 返回的数据只有text,len,target
+      // 根据返回的内容更新ui就不需要每次都调用getListData
+      const data: ListData = resData.obj;
+      if (data) {
         console.log(data);
+        // 初始化数据，图片需要点击加载
+        data.imgLoaded = false;
+        addMessageToList(data);
       }
+      
       // 清空文件输入
       if (input) {
         input.value = "";
       }
-      await getListData();
     } catch (error) {
       showError(`上传文件失败: ${error instanceof Error ? error.message : String(error)}`);
     }

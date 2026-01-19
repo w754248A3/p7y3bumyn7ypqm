@@ -14,10 +14,11 @@ interface PageConfig {
 
 // 页面列表配置
 const pages: PageConfig[] = [
+  { name:"文件列表",  component:FileList, icon:'📁'},
   { name: '文本消息', component: TextMessage, icon: '💬' },
   { name: '相机视图', component: CameraView, icon: '📷' },
   { name: '文件共享', component: FileShared, icon: '📁' },
-  { name:"文件列表",  component:FileList, icon:'📁'}
+  
 ];
 
 if (!pages[0]) {
