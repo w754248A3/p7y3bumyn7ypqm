@@ -21,12 +21,16 @@ interface MessageItem {
   id: number;
   text: string;
   isImage: boolean;
+  isFile?: boolean; // 是否是文件消息
+  fileExtension?: string; // 文件扩展名
   imageUrl?: string;
   imageBlob?: Blob;
+  fileBlob?: Blob; // 文件blob
   fileName?: string;
   timestamp?: string;
   isSent?: boolean;
   imgLoaded?: boolean;
+  fileLoaded?: boolean; // 文件是否已加载
   imgLoading?: boolean; // 是否正在加载
   imgLoadingProgress?: number; // 加载进度 0-100
 }
@@ -45,6 +49,24 @@ const fileInputRef = ref<HTMLInputElement | null>(null);
 const messages = ref<MessageItem[]>([]);
 
 const imgUrl = "/filelist?action=getMessage&app=fileList&target=";
+const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
+
+// 图片扩展名列表（不区分大小写）
+const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'ico', 'tiff', 'tif'];
+
+// 根据文件名获取文件扩展名
+const getFileExtension = (fileName: string): string => {
+  const match = /\.([a-zA-Z]+)$/.exec(fileName);
+  const ext = match?.[1];
+  return ext ? ext.toLowerCase() : "";
+};
+
+
+// 判断是否为图片文件（根据扩展名）
+const isImageFile = (fileName: string): boolean => {
+  const ext = getFileExtension(fileName);
+  return IMAGE_EXTENSIONS.includes(ext);
+};
 
 // 显示错误模态窗口
 const showError = (error: string) => {
@@ -86,9 +108,155 @@ watch(messages, () => {
   });
 }, { deep: true });
 
+// 下载文件
+const downloadFile = (blob: Blob, fileName: string) => {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  // 清理blob URL
+  setTimeout(() => URL.revokeObjectURL(url), 100);
+};
+
+// 加载文件（图片或其他文件）
+const loadFile = async (item: MessageItem) => {
+  // 如果是图片，使用原有的加载逻辑
+  if (item.isImage && item.isFile) {
+    return loadImage(item);
+  }
+  
+  // 如果是其他文件类型
+  if (item.fileLoaded || !item.isFile || !item.fileName || item.imgLoading) return;
+  
+  // 记录加载前的滚动状态
+  const container = messagesContainer.value;
+  if (!container) return;
+  
+  const scrollHeightBefore = container.scrollHeight;
+  const scrollTopBefore = container.scrollTop;
+  const clientHeightBefore = container.clientHeight;
+  const isNearBottom = scrollHeightBefore - scrollTopBefore - clientHeightBefore < 50;
+  
+  // 查找消息项
+  const msgIndex = messages.value.findIndex(m => m.id === item.id);
+  if (msgIndex === -1) return;
+  
+  const v = messages.value[msgIndex];
+  if (!v) {
+    console.log("messages.value[msgIndex] is false");
+    return;
+  }
+  
+  try {
+    const target = listViewDataRef.value.find(p => p.text === item.fileName && p.target !== null && p.target !== undefined)?.target;
+    if (target === null || target === undefined) return;
+
+    // 设置加载状态
+    v.imgLoading = true;
+    v.imgLoadingProgress = 0;
+
+    // 使用 XMLHttpRequest 来获取加载进度
+    return new Promise<void>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('GET', imgUrl + target, true);
+      xhr.responseType = 'blob';
+
+      // 监听进度事件
+      xhr.onprogress = (e) => {
+        if (e.lengthComputable && v) {
+          const percent = Math.round((e.loaded / e.total) * 100);
+          v.imgLoadingProgress = percent;
+        }
+      };
+
+      // 处理加载完成
+      xhr.onload = async () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const blob = xhr.response;
+            const fileName = item.fileName || 'file';
+            const file = new File([blob], fileName, { type: blob.type });
+            
+            // 更新消息项
+            if (v) {
+              v.fileLoaded = true;
+              v.imgLoading = false;
+              v.imgLoadingProgress = 100;
+              v.fileBlob = file;
+            }
+            
+            // 更新列表数据
+            const listIndex = listViewDataRef.value.findIndex(p => p.text === item.fileName && p.target === target);
+            if (listIndex !== -1) {
+              const listItem = listViewDataRef.value[listIndex];
+              if (listItem) {
+                listItem.imgLoaded = true;
+                listItem.imgBlob = file;
+                listItem.imgSrc = URL.createObjectURL(file);
+                listItem.imgFileName = fileName;
+              }
+            }
+            
+            // 等待DOM更新后自动下载文件
+            await nextTick();
+            downloadFile(file, fileName);
+            
+            // 调整滚动位置
+            if (container) {
+              const scrollHeightAfter = container.scrollHeight;
+              const heightDiff = scrollHeightAfter - scrollHeightBefore;
+              
+              if (isNearBottom) {
+                scrollToBottom();
+              } else if (heightDiff > 0) {
+                container.scrollTop = scrollTopBefore + heightDiff;
+              }
+            }
+            
+            resolve();
+          } catch (error) {
+            if (v) {
+              v.imgLoading = false;
+              v.imgLoadingProgress = 0;
+            }
+            reject(error);
+          }
+        } else {
+          if (v) {
+            v.imgLoading = false;
+            v.imgLoadingProgress = 0;
+          }
+          reject(new Error(`加载文件失败: HTTP ${xhr.status}`));
+        }
+      };
+
+      // 处理错误
+      xhr.onerror = () => {
+        if (v) {
+          v.imgLoading = false;
+          v.imgLoadingProgress = 0;
+        }
+        reject(new Error('网络错误'));
+      };
+
+      xhr.send();
+    });
+  } catch (error) {
+    if (v) {
+      v.imgLoading = false;
+      v.imgLoadingProgress = 0;
+    }
+    showError(`加载文件失败: ${error instanceof Error ? error.message : String(error)}`);
+  }
+};
+
 // 加载图片
 const loadImage = async (item: MessageItem) => {
-  if (item.imgLoaded || !item.isImage || !item.fileName || item.imgLoading) return;
+  if (item.imgLoaded || !item.isImage || !item.isFile || !item.fileName || item.imgLoading) return;
   
   // 记录加载前的滚动状态，防止图片加载后导致滚动跳跃
   const container = messagesContainer.value;
@@ -234,19 +402,32 @@ const downloadImage = (imageUrl: string, fileName: string) => {
 
 // 将 ListData 转换为 MessageItem
 const convertListDataToMessage = (item: ListData, index: number): MessageItem => {
-  const isImage = item.target !== null && item.len !== null && 
+  const isFile = item.target !== null && item.len !== null && 
                  item.target !== undefined && item.len !== undefined &&
                  typeof item.target === 'number' && typeof item.len === 'number';
+  
+  let isImage = false;
+  let fileExtension = '';
+  
+  if (isFile && item.text) {
+    fileExtension = getFileExtension(item.text);
+    isImage = isImageFile(item.text);
+  }
+  
   return {
     id: index,
     text: item.text || '',
     isImage: isImage,
-    imageUrl: item.imgSrc,
-    imageBlob: item.imgBlob,
-    fileName: isImage ? (item.text || 'image') : undefined,
+    isFile: isFile,
+    fileExtension: fileExtension,
+    imageUrl: isImage ? item.imgSrc : undefined,
+    imageBlob: isImage ? item.imgBlob : undefined,
+    fileBlob: !isImage && isFile ? item.imgBlob : undefined,
+    fileName: isFile ? (item.text || 'file') : undefined,
     timestamp: new Date().toLocaleTimeString(),
     isSent: index % 2 === 0,
-    imgLoaded: item.imgLoaded || false,
+    imgLoaded: isImage ? (item.imgLoaded || false) : false,
+    fileLoaded: !isImage && isFile ? (item.imgLoaded || false) : false,
     imgLoading: false,
     imgLoadingProgress: 0,
   };
@@ -381,9 +562,9 @@ const onFileChange = async (event: Event) => {
   if (input.files && input.files[0]) {
     const file = input.files[0];
 
-    // 检查是否是图片
-    if (!file.type.startsWith('image/')) {
-      showError("请选择图片文件");
+    // 检查文件大小（100MB限制）
+    if (file.size > MAX_FILE_SIZE) {
+      showError(`文件大小不能超过 ${MAX_FILE_SIZE / (1024 * 1024)}MB`);
       input.value = "";
       return;
     }
@@ -408,7 +589,7 @@ const onFileChange = async (event: Event) => {
       const data: ListData = resData.obj;
       if (data) {
         console.log(data);
-        // 初始化数据，图片需要点击加载
+        // 初始化数据，文件需要点击加载
         data.imgLoaded = false;
         addMessageToList(data);
       }
@@ -494,59 +675,104 @@ onMounted(() => {
         >
           <div class="message-bubble">
             <!-- 文本消息 -->
-            <p v-if="!message.isImage" class="message-text">{{ message.text }}</p>
+            <p v-if="!message.isFile" class="message-text">{{ message.text }}</p>
             
-            <!-- 图片消息 -->
+            <!-- 文件消息（图片或其他文件） -->
             <div v-else class="image-message">
               <div class="image-info">
                 <p class="image-filename">{{ message.fileName }}</p>
                 <span class="message-time">{{ message.timestamp || '刚刚' }}</span>
               </div>
               
-              <!-- 加载中，显示进度条 -->
-              <div v-if="message.imgLoading" class="image-loading-container">
-                <div class="image-placeholder loading-placeholder">
-                  <div class="placeholder-content">
-                    <span class="placeholder-icon">⏳</span>
-                    <div class="loading-progress-bar">
-                      <div class="loading-progress-fill" :style="{ width: (message.imgLoadingProgress || 0) + '%' }"></div>
+              <!-- 图片文件 -->
+              <template v-if="message.isImage">
+                <!-- 加载中，显示进度条 -->
+                <div v-if="message.imgLoading" class="image-loading-container">
+                  <div class="image-placeholder loading-placeholder">
+                    <div class="placeholder-content">
+                      <span class="placeholder-icon">⏳</span>
+                      <div class="loading-progress-bar">
+                        <div class="loading-progress-fill" :style="{ width: (message.imgLoadingProgress || 0) + '%' }"></div>
+                      </div>
+                      <span class="placeholder-text">{{ message.imgLoadingProgress || 0 }}%</span>
                     </div>
-                    <span class="placeholder-text">{{ message.imgLoadingProgress || 0 }}%</span>
                   </div>
                 </div>
-              </div>
-              
-              <!-- 未加载时显示占位符 -->
-              <div v-else-if="!message.imgLoaded" class="image-placeholder" @click="loadImage(message)">
-                <div class="placeholder-content">
-                  <span class="placeholder-icon">🖼️</span>
-                  <span class="placeholder-text">点击加载图片</span>
+                
+                <!-- 未加载时显示占位符 -->
+                <div v-else-if="!message.imgLoaded" class="image-placeholder" @click="loadFile(message)">
+                  <div class="placeholder-content">
+                    <span class="placeholder-icon">🖼️</span>
+                    <span class="placeholder-text">点击加载图片</span>
+                  </div>
                 </div>
-              </div>
-              
-              <!-- 已加载的图片 -->
-              <div v-else-if="message.imageUrl" class="image-container">
-                <img
-                  :src="message.imageUrl"
-                  :alt="message.fileName || '图片'"
-                  :title="message.fileName || '图片'"
-                  class="message-image"
-                  @click="handleImageClick(message)"
-                  @error="() => showError('图片加载失败')"
-                />
-              </div>
-              
-              <!-- 加载失败的情况 -->
-              <div v-else class="image-placeholder error-placeholder">
-                <div class="placeholder-content">
-                  <span class="placeholder-icon">❌</span>
-                  <span class="placeholder-text">加载失败</span>
+                
+                <!-- 已加载的图片 -->
+                <div v-else-if="message.imageUrl" class="image-container">
+                  <img
+                    :src="message.imageUrl"
+                    :alt="message.fileName || '图片'"
+                    :title="message.fileName || '图片'"
+                    class="message-image"
+                    @click="handleImageClick(message)"
+                    @error="() => showError('图片加载失败')"
+                  />
                 </div>
-              </div>
+                
+                <!-- 加载失败的情况 -->
+                <div v-else class="image-placeholder error-placeholder">
+                  <div class="placeholder-content">
+                    <span class="placeholder-icon">❌</span>
+                    <span class="placeholder-text">加载失败</span>
+                  </div>
+                </div>
+              </template>
+              
+              <!-- 其他文件类型 -->
+              <template v-else>
+                <!-- 加载中，显示进度条 -->
+                <div v-if="message.imgLoading" class="image-loading-container">
+                  <div class="file-placeholder loading-placeholder">
+                    <div class="placeholder-content">
+                      <span class="placeholder-icon">⏳</span>
+                      <div class="loading-progress-bar">
+                        <div class="loading-progress-fill" :style="{ width: (message.imgLoadingProgress || 0) + '%' }"></div>
+                      </div>
+                      <span class="placeholder-text">{{ message.imgLoadingProgress || 0 }}%</span>
+                    </div>
+                  </div>
+                </div>
+                
+                <!-- 未加载时显示占位符 -->
+                <div v-else-if="!message.fileLoaded" class="file-placeholder" @click="loadFile(message)">
+                  <div class="placeholder-content">
+                    <span class="placeholder-icon">📄</span>
+                    <span class="placeholder-text">点击下载文件</span>
+                    <span class="file-extension">{{ message.fileExtension || 'file' }}</span>
+                  </div>
+                </div>
+                
+                <!-- 已加载的文件 -->
+                <div v-else-if="message.fileLoaded" class="file-loaded">
+                  <div class="placeholder-content">
+                    <span class="placeholder-icon">✓</span>
+                    <span class="placeholder-text">文件已就绪</span>
+                    <span class="file-extension">{{ message.fileExtension || 'file' }}</span>
+                  </div>
+                </div>
+                
+                <!-- 加载失败的情况 -->
+                <div v-else class="file-placeholder error-placeholder">
+                  <div class="placeholder-content">
+                    <span class="placeholder-icon">❌</span>
+                    <span class="placeholder-text">加载失败</span>
+                  </div>
+                </div>
+              </template>
             </div>
             
             <!-- 文本消息的时间戳 -->
-            <span v-if="!message.isImage" class="message-time">{{ message.timestamp || '刚刚' }}</span>
+            <span v-if="!message.isFile" class="message-time">{{ message.timestamp || '刚刚' }}</span>
           </div>
         </div>
         
@@ -584,7 +810,6 @@ onMounted(() => {
         <input
           ref="fileInputRef"
           type="file"
-          accept="image/*"
           @change="onFileChange"
           style="display: none;"
         />
@@ -593,9 +818,9 @@ onMounted(() => {
           type="button"
           class="action-button image-button"
           @click="triggerFileSelect"
-          title="选择图片"
+          title="选择文件"
         >
-          <span class="button-icon">📷</span>
+          <span class="button-icon">📎</span>
         </button>
         
         <button
@@ -873,6 +1098,60 @@ onMounted(() => {
 
 .placeholder-text {
   font-size: 12px;
+}
+
+.file-placeholder {
+  width: 200px;
+  min-height: 120px;
+  border: 2px dashed rgba(255, 255, 255, 0.5);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  background: rgba(255, 255, 255, 0.1);
+  padding: 16px;
+}
+
+.message-received .file-placeholder {
+  border-color: rgba(0, 0, 0, 0.2);
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.file-placeholder:hover {
+  background: rgba(255, 255, 255, 0.2);
+  transform: scale(1.02);
+}
+
+.message-received .file-placeholder:hover {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.file-extension {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  margin-top: 4px;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.file-loaded {
+  width: 200px;
+  min-height: 120px;
+  border: 2px solid rgba(76, 175, 80, 0.5);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(76, 175, 80, 0.1);
+  padding: 16px;
+}
+
+.message-received .file-loaded {
+  border-color: rgba(76, 175, 80, 0.3);
+  background: rgba(76, 175, 80, 0.05);
 }
 
 .image-container {
@@ -1256,6 +1535,12 @@ onMounted(() => {
     height: 120px;
   }
 
+  .file-placeholder,
+  .file-loaded {
+    width: 150px;
+    min-height: 100px;
+  }
+
   .loading-progress-bar {
     width: 120px;
   }
@@ -1346,6 +1631,12 @@ onMounted(() => {
   .image-loading-container {
     width: 120px;
     height: 100px;
+  }
+
+  .file-placeholder,
+  .file-loaded {
+    width: 120px;
+    min-height: 80px;
   }
 
   .loading-progress-bar {
