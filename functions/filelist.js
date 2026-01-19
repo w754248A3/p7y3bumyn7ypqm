@@ -119,12 +119,13 @@ export const onRequestPost = async (context) => {
                     console.log({ d1res, start, end: start + spanCount, size });
                     start += spanCount;
                 }
-                return createRes(true, "ok", target);
+                return createRes(true, "ok", { text, len: size, target });
             }
             else {
                 const ps = context.env.d1filelistdata.prepare("INSERT INTO main (text) VALUES (?)");
                 const d1res = await ps.bind(text).run();
-                return createRes(true, "ok", { d1res, text });
+                console.log(d1res);
+                return createRes(true, "ok", { text, len: null, target: null });
             }
         }
         else {

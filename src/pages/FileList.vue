@@ -252,12 +252,18 @@ const postText = async () => {
     const resData: ResData = await postWithProgress("/filelist?action=sendMessage&app=fileList", fd, (n) => {
       progress.value = n;
     });
-
+    console.log(resData);
     if (resData.isOK === false) {
       const e = "发送文本失败: " + JSON.stringify(resData);
       showError(e);
       return;
     }
+    else{
+      //返回的数据只有text,len,target
+      //根据返回的内容更新ui就不需要每次都调用getListData
+        const data:ListData = resData.obj;
+        console.log(data);
+      }
 
     text_value.value = "";
     await getListData();
@@ -287,13 +293,18 @@ const onFileChange = async (event: Event) => {
       const resData: ResData = await postWithProgress("/filelist?action=sendMessage&app=fileList", fd, (n) => {
         progress.value = n;
       });
-
+      console.log(resData);
       if (resData.isOK === false) {
         const e = "上传文件失败: " + JSON.stringify(resData);
         showError(e);
         return;
       }
-
+      else{
+      //返回的数据只有text,len,target
+      //根据返回的内容更新ui就不需要每次都调用getListData
+        const data:ListData = resData.obj;
+        console.log(data);
+      }
       // 清空文件输入
       if (input) {
         input.value = "";

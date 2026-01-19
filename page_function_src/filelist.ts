@@ -205,7 +205,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
                 }
 
 
-                return createRes(true, "ok", target);
+                return createRes(true, "ok", {text, len:size, target});
 
 
 
@@ -216,8 +216,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
                 const ps = context.env.d1filelistdata.prepare("INSERT INTO main (text) VALUES (?)");
 
                 const d1res = await ps.bind((<string>text)).run();
-
-                return createRes(true, "ok", { d1res, text });
+                console.log(d1res);
+                return createRes(true, "ok", {text, len:null, target:null});
 
             }
 
