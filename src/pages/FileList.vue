@@ -26,7 +26,9 @@ interface MessageItem {
   fileName?: string;
   timestamp?: string;
   isSent?: boolean;
-  imgLoaded?:boolean;
+  imgLoaded?: boolean;
+  imgLoading?: boolean; // 是否正在加载
+  imgLoadingProgress?: number; // 加载进度 0-100
 }
 
 const progress = ref<number>(0);
@@ -86,7 +88,7 @@ watch(messages, () => {
 
 // 加载图片
 const loadImage = async (item: MessageItem) => {
-  if (item.imgLoaded || !item.isImage || !item.fileName) return;
+  if (item.imgLoaded || !item.isImage || !item.fileName || item.imgLoading) return;
   
   // 记录加载前的滚动状态，防止图片加载后导致滚动跳跃
   const container = messagesContainer.value;
@@ -97,69 +99,117 @@ const loadImage = async (item: MessageItem) => {
   const clientHeightBefore = container.clientHeight;
   const isNearBottom = scrollHeightBefore - scrollTopBefore - clientHeightBefore < 50; // 50px阈值
   
+  // 查找消息项
+  const msgIndex = messages.value.findIndex(m => m.id === item.id);
+  if (msgIndex === -1) return;
+  
+  const v = messages.value[msgIndex];
+  if (!v) {
+    console.log("messages.value[msgIndex] is false");
+    return;
+  }
+  
   try {
     const target = listViewDataRef.value.find(p => p.text === item.fileName && p.target !== null && p.target !== undefined)?.target;
     if (target === null || target === undefined) return;
 
-    const response = await fetch(imgUrl + target);
-    if (!response.ok) {
-      throw new Error(`加载图片失败: HTTP ${response.status}`);
-    }
-    
-    const blob = await response.blob();
-    // 创建带有文件名的blob
-    const fileName = item.fileName || 'image';
-    const file = new File([blob], fileName, { type: blob.type });
-    const url = URL.createObjectURL(file);
-    
-    // 更新消息项
-    const msgIndex = messages.value.findIndex(m => m.id === item.id);
-    if (msgIndex !== -1) {
+    // 设置加载状态
+    v.imgLoading = true;
+    v.imgLoadingProgress = 0;
 
-      const v = messages.value[msgIndex];
+    // 使用 XMLHttpRequest 来获取加载进度
+    return new Promise<void>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('GET', imgUrl + target, true);
+      xhr.responseType = 'blob';
 
-      if(!v){
-         console.log("messages.value[msgIndex] is false");
-        return;
-      }
-      v.imgLoaded = true;
-      v.imageUrl = url;
-      v.imageBlob = file;
-      
-    }
-    
-    // 更新列表数据
-    const listIndex = listViewDataRef.value.findIndex(p => p.text === item.fileName && p.target === target);
-    if (listIndex !== -1) {
+      // 监听进度事件
+      xhr.onprogress = (e) => {
+        if (e.lengthComputable && v) {
+          const percent = Math.round((e.loaded / e.total) * 100);
+          v.imgLoadingProgress = percent;
+        }
+      };
 
-      const v = listViewDataRef.value[listIndex];
+      // 处理加载完成
+      xhr.onload = async () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const blob = xhr.response;
+            const fileName = item.fileName || 'image';
+            const file = new File([blob], fileName, { type: blob.type });
+            const url = URL.createObjectURL(file);
+            
+            // 更新消息项
+            if (v) {
+              v.imgLoaded = true;
+              v.imgLoading = false;
+              v.imgLoadingProgress = 100;
+              v.imageUrl = url;
+              v.imageBlob = file;
+            }
+            
+            // 更新列表数据
+            const listIndex = listViewDataRef.value.findIndex(p => p.text === item.fileName && p.target === target);
+            if (listIndex !== -1) {
+              const listItem = listViewDataRef.value[listIndex];
+              if (listItem) {
+                listItem.imgLoaded = true;
+                listItem.imgSrc = url;
+                listItem.imgBlob = file;
+                listItem.imgFileName = fileName;
+              }
+            }
+            
+            // 等待DOM更新后调整滚动位置
+            await nextTick();
+            
+            if (container) {
+              const scrollHeightAfter = container.scrollHeight;
+              const heightDiff = scrollHeightAfter - scrollHeightBefore;
+              
+              if (isNearBottom) {
+                // 如果之前在底部附近，保持滚动到底部
+                scrollToBottom();
+              } else if (heightDiff > 0) {
+                // 如果不在底部，增加滚动位置以保持视觉位置
+                container.scrollTop = scrollTopBefore + heightDiff;
+              }
+            }
+            
+            resolve();
+          } catch (error) {
+            if (v) {
+              v.imgLoading = false;
+              v.imgLoadingProgress = 0;
+            }
+            reject(error);
+          }
+        } else {
+          if (v) {
+            v.imgLoading = false;
+            v.imgLoadingProgress = 0;
+          }
+          reject(new Error(`加载图片失败: HTTP ${xhr.status}`));
+        }
+      };
 
-      if(!v){
-        console.log("listViewDataRef.value[listIndex] is false");
-        return;
-      }
-      v.imgLoaded = true;
-      v.imgSrc = url;
-      v.imgBlob = file;
-      v.imgFileName = fileName;
-    }
-    
-    // 等待DOM更新后调整滚动位置
-    await nextTick();
-    
-    if (container) {
-      const scrollHeightAfter = container.scrollHeight;
-      const heightDiff = scrollHeightAfter - scrollHeightBefore;
-      
-      if (isNearBottom) {
-        // 如果之前在底部附近，保持滚动到底部
-        scrollToBottom();
-      } else if (heightDiff > 0) {
-        // 如果不在底部，增加滚动位置以保持视觉位置
-        container.scrollTop = scrollTopBefore + heightDiff;
-      }
-    }
+      // 处理错误
+      xhr.onerror = () => {
+        if (v) {
+          v.imgLoading = false;
+          v.imgLoadingProgress = 0;
+        }
+        reject(new Error('网络错误'));
+      };
+
+      xhr.send();
+    });
   } catch (error) {
+    if (v) {
+      v.imgLoading = false;
+      v.imgLoadingProgress = 0;
+    }
     showError(`加载图片失败: ${error instanceof Error ? error.message : String(error)}`);
   }
 };
@@ -197,6 +247,8 @@ const convertListDataToMessage = (item: ListData, index: number): MessageItem =>
     timestamp: new Date().toLocaleTimeString(),
     isSent: index % 2 === 0,
     imgLoaded: item.imgLoaded || false,
+    imgLoading: false,
+    imgLoadingProgress: 0,
   };
 };
 
@@ -451,8 +503,21 @@ onMounted(() => {
                 <span class="message-time">{{ message.timestamp || '刚刚' }}</span>
               </div>
               
+              <!-- 加载中，显示进度条 -->
+              <div v-if="message.imgLoading" class="image-loading-container">
+                <div class="image-placeholder loading-placeholder">
+                  <div class="placeholder-content">
+                    <span class="placeholder-icon">⏳</span>
+                    <div class="loading-progress-bar">
+                      <div class="loading-progress-fill" :style="{ width: (message.imgLoadingProgress || 0) + '%' }"></div>
+                    </div>
+                    <span class="placeholder-text">{{ message.imgLoadingProgress || 0 }}%</span>
+                  </div>
+                </div>
+              </div>
+              
               <!-- 未加载时显示占位符 -->
-              <div v-if="!message.imgLoaded" class="image-placeholder" @click="loadImage(message)">
+              <div v-else-if="!message.imgLoaded" class="image-placeholder" @click="loadImage(message)">
                 <div class="placeholder-content">
                   <span class="placeholder-icon">🖼️</span>
                   <span class="placeholder-text">点击加载图片</span>
@@ -753,6 +818,45 @@ onMounted(() => {
 
 .error-placeholder:hover {
   transform: none;
+}
+
+.loading-placeholder {
+  cursor: default;
+  pointer-events: none;
+}
+
+.loading-placeholder:hover {
+  transform: none;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.message-received .loading-placeholder:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.image-loading-container {
+  width: 200px;
+  height: 150px;
+}
+
+.loading-progress-bar {
+  width: 150px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 2px;
+  overflow: hidden;
+  margin: 8px 0;
+}
+
+.message-received .loading-progress-bar {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.loading-progress-fill {
+  height: 100%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  transition: width 0.3s ease;
+  border-radius: 2px;
 }
 
 .placeholder-content {
@@ -1147,6 +1251,15 @@ onMounted(() => {
     height: 120px;
   }
 
+  .image-loading-container {
+    width: 150px;
+    height: 120px;
+  }
+
+  .loading-progress-bar {
+    width: 120px;
+  }
+
   .image-container {
     max-width: 250px;
   }
@@ -1228,6 +1341,15 @@ onMounted(() => {
   .image-placeholder {
     width: 120px;
     height: 100px;
+  }
+
+  .image-loading-container {
+    width: 120px;
+    height: 100px;
+  }
+
+  .loading-progress-bar {
+    width: 100px;
   }
 
   .placeholder-icon {
