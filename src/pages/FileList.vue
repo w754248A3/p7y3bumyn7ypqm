@@ -111,6 +111,9 @@ const postText = async()=>{
         errorlog.value+="\n"+ e;
         throw Error(e);
     }
+    else{
+      getListData();
+    }
 };
 
 
@@ -139,7 +142,9 @@ const onFileChange = async (event: Event) => {
         errorlog.value+="\n"+ e;
         throw Error(e);
     }
-    
+    else{
+      getListData();
+    }
   }
 };
 
@@ -155,6 +160,9 @@ const deleteData=async()=>{
         const e = "deleteData error:"+ JSON.stringify(resdata);
         errorlog.value+="\n"+ e;
         throw Error(e);
+    }
+    else{
+      getListData();
     }
 
 };
@@ -181,7 +189,7 @@ const deleteData=async()=>{
     </div>
     <div>
       <label v-if="is_progress">{{ progress }}</label>
-        <input type="text" :value="text_value">
+        <input type="text" v-bind:value="text_value">
         <input type="button" v-on:click="postText" value="post text">
         <input type="button" v-on:click="getListData" value="load">
         <input type="file" accept="image/*" @change="onFileChange">
