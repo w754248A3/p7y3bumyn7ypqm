@@ -21,10 +21,13 @@ interface MessageItem {
   id: number;
   text: string;
   isImage: boolean;
+  isVideo: boolean; // 是否是视频消息
   isFile?: boolean; // 是否是文件消息
   fileExtension?: string; // 文件扩展名
   imageUrl?: string;
   imageBlob?: Blob;
+  videoUrl?: string; // 视频预览地址
+  videoBlob?: Blob; // 视频Blob
   fileBlob?: Blob; // 文件blob
   fileName?: string;
   timestamp?: string;
@@ -41,8 +44,12 @@ const listViewDataRef = ref<ListData[]>([]);
 const errorMessage = ref<string>("");
 const showErrorModal = ref<boolean>(false);
 const showImageModal = ref<boolean>(false);
+const showVideoModal = ref<boolean>(false); // 视频模态框状态
 const modalImageUrl = ref<string>("");
 const modalImageFileName = ref<string>("");
+const modalVideoUrl = ref<string>(""); // 模态框视频地址
+const modalVideoFileName = ref<string>(""); // 模态框视频文件名
+const modalVideoBlob = ref<Blob | null>(null); // 模态框视频Blob（用于下载）
 const text_value = ref<string>("");
 const messagesContainer = ref<HTMLElement | null>(null);
 const fileInputRef = ref<HTMLInputElement | null>(null);
@@ -51,21 +58,28 @@ const messages = ref<MessageItem[]>([]);
 const imgUrl = "/filelist?action=getMessage&app=fileList&target=";
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
 
-// 图片扩展名列表（不区分大小写）
+// 图片扩展名列表
 const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'ico', 'tiff', 'tif'];
+// 浏览器支持的视频扩展名列表
+const VIDEO_EXTENSIONS = ['mp4', 'webm', 'ogg'];
 
 // 根据文件名获取文件扩展名
 const getFileExtension = (fileName: string): string => {
-  const match = /\.([a-zA-Z]+)$/.exec(fileName);
+  const match = /\.([a-zA-Z0-9]+)$/.exec(fileName);
   const ext = match?.[1];
   return ext ? ext.toLowerCase() : "";
 };
 
-
-// 判断是否为图片文件（根据扩展名）
+// 判断是否为图片文件
 const isImageFile = (fileName: string): boolean => {
   const ext = getFileExtension(fileName);
   return IMAGE_EXTENSIONS.includes(ext);
+};
+
+// 判断是否为视频文件
+const isVideoFile = (fileName: string): boolean => {
+  const ext = getFileExtension(fileName);
+  return VIDEO_EXTENSIONS.includes(ext);
 };
 
 // 显示错误模态窗口
@@ -92,6 +106,22 @@ const closeImageModal = () => {
   showImageModal.value = false;
   modalImageUrl.value = "";
   modalImageFileName.value = "";
+};
+
+// 显示视频预览模态窗口
+const showVideoPreview = (videoUrl: string, fileName: string, blob?: Blob) => {
+  modalVideoUrl.value = videoUrl;
+  modalVideoFileName.value = fileName;
+  modalVideoBlob.value = blob || null;
+  showVideoModal.value = true;
+};
+
+// 关闭视频模态窗口
+const closeVideoModal = () => {
+  showVideoModal.value = false;
+  modalVideoUrl.value = "";
+  modalVideoFileName.value = "";
+  modalVideoBlob.value = null;
 };
 
 // 滚动到底部
@@ -122,50 +152,119 @@ const downloadFile = (blob: Blob, fileName: string) => {
   setTimeout(() => URL.revokeObjectURL(url), 100);
 };
 
-// 加载文件（图片或其他文件）
+// 加载文件（图片、视频或其他文件）
 const loadFile = async (item: MessageItem) => {
-  // 如果是图片，使用原有的加载逻辑
-  if (item.isImage && item.isFile) {
-    return loadImage(item);
-  }
-  
-  // 如果是其他文件类型
-  if (item.fileLoaded || !item.isFile || !item.fileName || item.imgLoading) return;
-  
-  // 记录加载前的滚动状态
-  const container = messagesContainer.value;
-  if (!container) return;
-  
-  const scrollHeightBefore = container.scrollHeight;
-  const scrollTopBefore = container.scrollTop;
-  const clientHeightBefore = container.clientHeight;
-  const isNearBottom = scrollHeightBefore - scrollTopBefore - clientHeightBefore < 50;
-  
-  // 查找消息项
-  const msgIndex = messages.value.findIndex(m => m.id === item.id);
-  if (msgIndex === -1) return;
-  
-  const v = messages.value[msgIndex];
-  if (!v) {
-    console.log("messages.value[msgIndex] is false");
+  // 如果是图片或视频，且未加载，则开始加载
+  if ((item.isImage || item.isVideo) && item.isFile) {
+    if (item.imgLoaded || item.imgLoading) return;
+    
+    // 记录加载前的滚动状态
+    const container = messagesContainer.value;
+    if (!container) return;
+    
+    const scrollHeightBefore = container.scrollHeight;
+    const scrollTopBefore = container.scrollTop;
+    const clientHeightBefore = container.clientHeight;
+    const isNearBottom = scrollHeightBefore - scrollTopBefore - clientHeightBefore < 50;
+    
+    const msgIndex = messages.value.findIndex(m => m.id === item.id);
+    if (msgIndex === -1) return;
+    
+    const v = messages.value[msgIndex];
+    if (!v) return;
+    
+    try {
+      const target = listViewDataRef.value.find(p => p.text === item.fileName && p.target !== null && p.target !== undefined)?.target;
+      if (target === null || target === undefined) return;
+
+      v.imgLoading = true;
+      v.imgLoadingProgress = 0;
+
+      return new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('GET', imgUrl + target, true);
+        xhr.responseType = 'blob';
+
+        xhr.onprogress = (e) => {
+          if (e.lengthComputable && v) {
+            const percent = Math.round((e.loaded / e.total) * 100);
+            v.imgLoadingProgress = percent;
+          }
+        };
+
+        xhr.onload = async () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const blob = xhr.response;
+              const fileName = item.fileName || (item.isImage ? 'image' : 'video');
+              const file = new File([blob], fileName, { type: blob.type });
+              const url = URL.createObjectURL(file);
+              
+              if (v) {
+                v.imgLoaded = true;
+                v.imgLoading = false;
+                v.imgLoadingProgress = 100;
+                if (item.isImage) {
+                  v.imageUrl = url;
+                  v.imageBlob = file;
+                } else {
+                  v.videoUrl = url;
+                  v.videoBlob = file;
+                }
+              }
+              
+              await nextTick();
+              
+              if (container) {
+                const scrollHeightAfter = container.scrollHeight;
+                const heightDiff = scrollHeightAfter - scrollHeightBefore;
+                if (isNearBottom) scrollToBottom();
+                else if (heightDiff > 0) container.scrollTop = scrollTopBefore + heightDiff;
+              }
+              resolve();
+            } catch (error) {
+              if (v) v.imgLoading = false;
+              reject(error);
+            }
+          } else {
+            if (v) v.imgLoading = false;
+            reject(new Error(`加载失败: HTTP ${xhr.status}`));
+          }
+        };
+
+        xhr.onerror = () => {
+          if (v) v.imgLoading = false;
+          reject(new Error('网络错误'));
+        };
+        xhr.send();
+      });
+    } catch (error) {
+      if (v) v.imgLoading = false;
+      showError(`加载失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
     return;
   }
+  
+  // 如果是其他普通文件类型
+  if (item.fileLoaded || !item.isFile || !item.fileName || item.imgLoading) return;
+  
+  const msgIndex = messages.value.findIndex(m => m.id === item.id);
+  if (msgIndex === -1) return;
+  const v = messages.value[msgIndex];
+  if (!v) return;
   
   try {
     const target = listViewDataRef.value.find(p => p.text === item.fileName && p.target !== null && p.target !== undefined)?.target;
     if (target === null || target === undefined) return;
 
-    // 设置加载状态
     v.imgLoading = true;
     v.imgLoadingProgress = 0;
 
-    // 使用 XMLHttpRequest 来获取加载进度
     return new Promise<void>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open('GET', imgUrl + target, true);
       xhr.responseType = 'blob';
 
-      // 监听进度事件
       xhr.onprogress = (e) => {
         if (e.lengthComputable && v) {
           const percent = Math.round((e.loaded / e.total) * 100);
@@ -173,7 +272,6 @@ const loadFile = async (item: MessageItem) => {
         }
       };
 
-      // 处理加载完成
       xhr.onload = async () => {
         if (xhr.status >= 200 && xhr.status < 300) {
           try {
@@ -181,7 +279,6 @@ const loadFile = async (item: MessageItem) => {
             const fileName = item.fileName || 'file';
             const file = new File([blob], fileName, { type: blob.type });
             
-            // 更新消息项
             if (v) {
               v.fileLoaded = true;
               v.imgLoading = false;
@@ -189,215 +286,44 @@ const loadFile = async (item: MessageItem) => {
               v.fileBlob = file;
             }
             
-            // 更新列表数据
-            const listIndex = listViewDataRef.value.findIndex(p => p.text === item.fileName && p.target === target);
-            if (listIndex !== -1) {
-              const listItem = listViewDataRef.value[listIndex];
-              if (listItem) {
-                listItem.imgLoaded = true;
-                listItem.imgBlob = file;
-                listItem.imgSrc = URL.createObjectURL(file);
-                listItem.imgFileName = fileName;
-              }
-            }
-            
-            // 等待DOM更新后自动下载文件
             await nextTick();
             downloadFile(file, fileName);
-            
-            // 调整滚动位置
-            if (container) {
-              const scrollHeightAfter = container.scrollHeight;
-              const heightDiff = scrollHeightAfter - scrollHeightBefore;
-              
-              if (isNearBottom) {
-                scrollToBottom();
-              } else if (heightDiff > 0) {
-                container.scrollTop = scrollTopBefore + heightDiff;
-              }
-            }
-            
             resolve();
           } catch (error) {
-            if (v) {
-              v.imgLoading = false;
-              v.imgLoadingProgress = 0;
-            }
+            if (v) v.imgLoading = false;
             reject(error);
           }
         } else {
-          if (v) {
-            v.imgLoading = false;
-            v.imgLoadingProgress = 0;
-          }
-          reject(new Error(`加载文件失败: HTTP ${xhr.status}`));
+          if (v) v.imgLoading = false;
+          reject(new Error(`下载失败: HTTP ${xhr.status}`));
         }
       };
-
-      // 处理错误
       xhr.onerror = () => {
-        if (v) {
-          v.imgLoading = false;
-          v.imgLoadingProgress = 0;
-        }
+        if (v) v.imgLoading = false;
         reject(new Error('网络错误'));
       };
-
       xhr.send();
     });
   } catch (error) {
-    if (v) {
-      v.imgLoading = false;
-      v.imgLoadingProgress = 0;
-    }
-    showError(`加载文件失败: ${error instanceof Error ? error.message : String(error)}`);
+    if (v) v.imgLoading = false;
+    showError(`下载失败: ${error instanceof Error ? error.message : String(error)}`);
   }
 };
 
-// 加载图片
-const loadImage = async (item: MessageItem) => {
-  if (item.imgLoaded || !item.isImage || !item.isFile || !item.fileName || item.imgLoading) return;
-  
-  // 记录加载前的滚动状态，防止图片加载后导致滚动跳跃
-  const container = messagesContainer.value;
-  if (!container) return;
-  
-  const scrollHeightBefore = container.scrollHeight;
-  const scrollTopBefore = container.scrollTop;
-  const clientHeightBefore = container.clientHeight;
-  const isNearBottom = scrollHeightBefore - scrollTopBefore - clientHeightBefore < 50; // 50px阈值
-  
-  // 查找消息项
-  const msgIndex = messages.value.findIndex(m => m.id === item.id);
-  if (msgIndex === -1) return;
-  
-  const v = messages.value[msgIndex];
-  if (!v) {
-    console.log("messages.value[msgIndex] is false");
-    return;
-  }
-  
-  try {
-    const target = listViewDataRef.value.find(p => p.text === item.fileName && p.target !== null && p.target !== undefined)?.target;
-    if (target === null || target === undefined) return;
-
-    // 设置加载状态
-    v.imgLoading = true;
-    v.imgLoadingProgress = 0;
-
-    // 使用 XMLHttpRequest 来获取加载进度
-    return new Promise<void>((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open('GET', imgUrl + target, true);
-      xhr.responseType = 'blob';
-
-      // 监听进度事件
-      xhr.onprogress = (e) => {
-        if (e.lengthComputable && v) {
-          const percent = Math.round((e.loaded / e.total) * 100);
-          v.imgLoadingProgress = percent;
-        }
-      };
-
-      // 处理加载完成
-      xhr.onload = async () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          try {
-            const blob = xhr.response;
-            const fileName = item.fileName || 'image';
-            const file = new File([blob], fileName, { type: blob.type });
-            const url = URL.createObjectURL(file);
-            
-            // 更新消息项
-            if (v) {
-              v.imgLoaded = true;
-              v.imgLoading = false;
-              v.imgLoadingProgress = 100;
-              v.imageUrl = url;
-              v.imageBlob = file;
-            }
-            
-            // 更新列表数据
-            const listIndex = listViewDataRef.value.findIndex(p => p.text === item.fileName && p.target === target);
-            if (listIndex !== -1) {
-              const listItem = listViewDataRef.value[listIndex];
-              if (listItem) {
-                listItem.imgLoaded = true;
-                listItem.imgSrc = url;
-                listItem.imgBlob = file;
-                listItem.imgFileName = fileName;
-              }
-            }
-            
-            // 等待DOM更新后调整滚动位置
-            await nextTick();
-            
-            if (container) {
-              const scrollHeightAfter = container.scrollHeight;
-              const heightDiff = scrollHeightAfter - scrollHeightBefore;
-              
-              if (isNearBottom) {
-                // 如果之前在底部附近，保持滚动到底部
-                scrollToBottom();
-              } else if (heightDiff > 0) {
-                // 如果不在底部，增加滚动位置以保持视觉位置
-                container.scrollTop = scrollTopBefore + heightDiff;
-              }
-            }
-            
-            resolve();
-          } catch (error) {
-            if (v) {
-              v.imgLoading = false;
-              v.imgLoadingProgress = 0;
-            }
-            reject(error);
-          }
-        } else {
-          if (v) {
-            v.imgLoading = false;
-            v.imgLoadingProgress = 0;
-          }
-          reject(new Error(`加载图片失败: HTTP ${xhr.status}`));
-        }
-      };
-
-      // 处理错误
-      xhr.onerror = () => {
-        if (v) {
-          v.imgLoading = false;
-          v.imgLoadingProgress = 0;
-        }
-        reject(new Error('网络错误'));
-      };
-
-      xhr.send();
-    });
-  } catch (error) {
-    if (v) {
-      v.imgLoading = false;
-      v.imgLoadingProgress = 0;
-    }
-    showError(`加载图片失败: ${error instanceof Error ? error.message : String(error)}`);
-  }
-};
-
-// 点击图片显示模态窗口
+// 点击图片处理
 const handleImageClick = (item: MessageItem) => {
   if (item.imageUrl && item.fileName) {
     showImagePreview(item.imageUrl, item.fileName);
   }
 };
 
-// 下载图片
-const downloadImage = (imageUrl: string, fileName: string) => {
-  const link = document.createElement('a');
-  link.href = imageUrl;
-  link.download = fileName;
-  link.style.display = 'none';
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+// 点击视频处理
+const handleVideoClick = (item: MessageItem) => {
+  if (!item.imgLoaded) {
+    loadFile(item);
+  } else if (item.videoUrl && item.fileName) {
+    showVideoPreview(item.videoUrl, item.fileName, item.videoBlob);
+  }
 };
 
 // 将 ListData 转换为 MessageItem
@@ -407,27 +333,32 @@ const convertListDataToMessage = (item: ListData, index: number): MessageItem =>
                  typeof item.target === 'number' && typeof item.len === 'number';
   
   let isImage = false;
+  let isVideo = false;
   let fileExtension = '';
   
   if (isFile && item.text) {
     fileExtension = getFileExtension(item.text);
     isImage = isImageFile(item.text);
+    isVideo = isVideoFile(item.text);
   }
   
   return {
     id: index,
     text: item.text || '',
     isImage: isImage,
+    isVideo: isVideo,
     isFile: isFile,
     fileExtension: fileExtension,
     imageUrl: isImage ? item.imgSrc : undefined,
+    videoUrl: isVideo ? item.imgSrc : undefined,
     imageBlob: isImage ? item.imgBlob : undefined,
-    fileBlob: !isImage && isFile ? item.imgBlob : undefined,
+    videoBlob: isVideo ? item.imgBlob : undefined,
+    fileBlob: !isImage && !isVideo && isFile ? item.imgBlob : undefined,
     fileName: isFile ? (item.text || 'file') : undefined,
     timestamp: new Date().toLocaleTimeString(),
-    isSent: index % 2 === 0,
-    imgLoaded: isImage ? (item.imgLoaded || false) : false,
-    fileLoaded: !isImage && isFile ? (item.imgLoaded || false) : false,
+    isSent: true, // 统一设为发送方样式
+    imgLoaded: (isImage || isVideo) ? (item.imgLoaded || false) : false,
+    fileLoaded: !isImage && !isVideo && isFile ? (item.imgLoaded || false) : false,
     imgLoading: false,
     imgLoadingProgress: 0,
   };
@@ -435,17 +366,10 @@ const convertListDataToMessage = (item: ListData, index: number): MessageItem =>
 
 // 添加新消息到列表
 const addMessageToList = (data: ListData) => {
-  // 添加到 listViewDataRef
   listViewDataRef.value.push(data);
-  
-  // 计算新的索引
   const newIndex = listViewDataRef.value.length - 1;
-  
-  // 转换为消息并添加到 messages
   const newMessage = convertListDataToMessage(data, newIndex);
   messages.value.push(newMessage);
-  
-  // 滚动到底部
   nextTick(() => {
     scrollToBottom();
   });
@@ -455,22 +379,15 @@ const addMessageToList = (data: ListData) => {
 const getListData = async () => {
   try {
     const res = await fetch("/filelist?action=getMessage&app=fileList");
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
     const resdata: ResData = await res.json();
-    console.log(resdata);
-    
     if (resdata.isOK === false) {
-      const e = "获取消息列表失败: " + JSON.stringify(resdata);
-      showError(e);
+      showError("获取消息列表失败: " + JSON.stringify(resdata));
       return;
     }
 
     listViewDataRef.value = resdata.obj || [];
-    
-    // 转换为消息格式
     messages.value = listViewDataRef.value.map((item, index) => {
       return convertListDataToMessage(item, index);
     });
@@ -499,11 +416,8 @@ function postWithProgress(url: string, formData: FormData, onProgress: (v: numbe
     xhr.onload = () => {
       is_progress.value = false;
       if (xhr.status >= 200 && xhr.status < 300) {
-        if (!xhr.response) {
-          reject(new Error("HTTP 响应为空"));
-        } else {
-          resolve(xhr.response);
-        }
+        if (!xhr.response) reject(new Error("HTTP 响应为空"));
+        else resolve(xhr.response);
       } else {
         reject(new Error(`HTTP ${xhr.status}`));
       }
@@ -513,7 +427,6 @@ function postWithProgress(url: string, formData: FormData, onProgress: (v: numbe
       is_progress.value = false;
       reject(new Error("网络错误"));
     };
-
     xhr.send(formData);
   });
 }
@@ -533,23 +446,16 @@ const postText = async () => {
     const resData: ResData = await postWithProgress("/filelist?action=sendMessage&app=fileList", fd, (n) => {
       progress.value = n;
     });
-    console.log(resData);
     if (resData.isOK === false) {
-      const e = "发送文本失败: " + JSON.stringify(resData);
-      showError(e);
+      showError("发送文本失败: " + JSON.stringify(resData));
       return;
     }
     
-    // 返回的数据只有text,len,target
-    // 根据返回的内容更新ui就不需要每次都调用getListData
     const data: ListData = resData.obj;
     if (data) {
-      console.log(data);
-      // 初始化数据
       data.imgLoaded = false;
       addMessageToList(data);
     }
-
     text_value.value = "";
   } catch (error) {
     showError(`发送文本失败: ${error instanceof Error ? error.message : String(error)}`);
@@ -562,7 +468,6 @@ const onFileChange = async (event: Event) => {
   if (input.files && input.files[0]) {
     const file = input.files[0];
 
-    // 检查文件大小（100MB限制）
     if (file.size > MAX_FILE_SIZE) {
       showError(`文件大小不能超过 ${MAX_FILE_SIZE / (1024 * 1024)}MB`);
       input.value = "";
@@ -577,27 +482,17 @@ const onFileChange = async (event: Event) => {
       const resData: ResData = await postWithProgress("/filelist?action=sendMessage&app=fileList", fd, (n) => {
         progress.value = n;
       });
-      console.log(resData);
       if (resData.isOK === false) {
-        const e = "上传文件失败: " + JSON.stringify(resData);
-        showError(e);
+        showError("上传文件失败: " + JSON.stringify(resData));
         return;
       }
       
-      // 返回的数据只有text,len,target
-      // 根据返回的内容更新ui就不需要每次都调用getListData
       const data: ListData = resData.obj;
       if (data) {
-        console.log(data);
-        // 初始化数据，文件需要点击加载
         data.imgLoaded = false;
         addMessageToList(data);
       }
-      
-      // 清空文件输入
-      if (input) {
-        input.value = "";
-      }
+      input.value = "";
     } catch (error) {
       showError(`上传文件失败: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -606,42 +501,30 @@ const onFileChange = async (event: Event) => {
 
 // 触发文件选择
 const triggerFileSelect = () => {
-  if (fileInputRef.value) {
-    fileInputRef.value.click();
-  }
+  if (fileInputRef.value) fileInputRef.value.click();
 };
 
 // 删除所有数据
 const deleteData = async () => {
-  if (!confirm("确定要删除所有消息吗？")) {
-    return;
-  }
+  if (!confirm("确定要删除所有消息吗？")) return;
 
   try {
     const res = await fetch("/filelist?action=deleteMessage&app=fileList", {
       method: "DELETE"
     });
-    
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
-    
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const resdata: ResData = await res.json();
-    console.log(resdata);
-    
     if (resdata.isOK === false) {
-      const e = "删除消息失败: " + JSON.stringify(resdata);
-      showError(e);
+      showError("删除消息失败: " + JSON.stringify(resdata));
       return;
     }
-
     await getListData();
   } catch (error) {
     showError(`删除消息失败: ${error instanceof Error ? error.message : String(error)}`);
   }
 };
 
-// 回车发送消息（Shift+Enter换行）
+// 回车发送消息
 const handleKeyDown = (event: KeyboardEvent) => {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
@@ -652,9 +535,7 @@ const handleKeyDown = (event: KeyboardEvent) => {
 // 处理输入框聚焦
 const handleInputFocus = () => {
   setTimeout(() => {
-    if (messagesContainer.value) {
-      scrollToBottom();
-    }
+    if (messagesContainer.value) scrollToBottom();
   }, 300);
 };
 
@@ -671,13 +552,13 @@ onMounted(() => {
         <div
           v-for="(message, index) in messages"
           :key="message.id || index"
-          :class="['message', message.isSent ? 'message-sent' : 'message-received']"
+          class="message message-sent"
         >
           <div class="message-bubble">
             <!-- 文本消息 -->
             <p v-if="!message.isFile" class="message-text">{{ message.text }}</p>
             
-            <!-- 文件消息（图片或其他文件） -->
+            <!-- 文件消息 -->
             <div v-else class="image-message">
               <div class="image-info">
                 <p class="image-filename">{{ message.fileName }}</p>
@@ -686,7 +567,6 @@ onMounted(() => {
               
               <!-- 图片文件 -->
               <template v-if="message.isImage">
-                <!-- 加载中，显示进度条 -->
                 <div v-if="message.imgLoading" class="image-loading-container">
                   <div class="image-placeholder loading-placeholder">
                     <div class="placeholder-content">
@@ -699,7 +579,6 @@ onMounted(() => {
                   </div>
                 </div>
                 
-                <!-- 未加载时显示占位符 -->
                 <div v-else-if="!message.imgLoaded" class="image-placeholder" @click="loadFile(message)">
                   <div class="placeholder-content">
                     <span class="placeholder-icon">🖼️</span>
@@ -707,19 +586,57 @@ onMounted(() => {
                   </div>
                 </div>
                 
-                <!-- 已加载的图片 -->
                 <div v-else-if="message.imageUrl" class="image-container">
                   <img
                     :src="message.imageUrl"
                     :alt="message.fileName || '图片'"
-                    :title="message.fileName || '图片'"
                     class="message-image"
                     @click="handleImageClick(message)"
                     @error="() => showError('图片加载失败')"
                   />
                 </div>
                 
-                <!-- 加载失败的情况 -->
+                <div v-else class="image-placeholder error-placeholder">
+                  <div class="placeholder-content">
+                    <span class="placeholder-icon">❌</span>
+                    <span class="placeholder-text">加载失败</span>
+                  </div>
+                </div>
+              </template>
+
+              <!-- 视频文件 -->
+              <template v-else-if="message.isVideo">
+                <div v-if="message.imgLoading" class="image-loading-container">
+                  <div class="image-placeholder loading-placeholder">
+                    <div class="placeholder-content">
+                      <span class="placeholder-icon">⏳</span>
+                      <div class="loading-progress-bar">
+                        <div class="loading-progress-fill" :style="{ width: (message.imgLoadingProgress || 0) + '%' }"></div>
+                      </div>
+                      <span class="placeholder-text">{{ message.imgLoadingProgress || 0 }}%</span>
+                    </div>
+                  </div>
+                </div>
+                
+                <div v-else-if="!message.imgLoaded" class="image-placeholder" @click="loadFile(message)">
+                  <div class="placeholder-content">
+                    <span class="placeholder-icon">🎥</span>
+                    <span class="placeholder-text">点击加载视频</span>
+                  </div>
+                </div>
+                
+                <div v-else-if="message.videoUrl" class="image-container video-preview-container">
+                  <video
+                    :src="message.videoUrl"
+                    class="message-video"
+                    preload="metadata"
+                    @click="handleVideoClick(message)"
+                  ></video>
+                  <div class="video-play-overlay">
+                    <span class="play-icon">▶</span>
+                  </div>
+                </div>
+                
                 <div v-else class="image-placeholder error-placeholder">
                   <div class="placeholder-content">
                     <span class="placeholder-icon">❌</span>
@@ -730,7 +647,6 @@ onMounted(() => {
               
               <!-- 其他文件类型 -->
               <template v-else>
-                <!-- 加载中，显示进度条 -->
                 <div v-if="message.imgLoading" class="image-loading-container">
                   <div class="file-placeholder loading-placeholder">
                     <div class="placeholder-content">
@@ -743,7 +659,6 @@ onMounted(() => {
                   </div>
                 </div>
                 
-                <!-- 未加载时显示占位符 -->
                 <div v-else-if="!message.fileLoaded" class="file-placeholder" @click="loadFile(message)">
                   <div class="placeholder-content">
                     <span class="placeholder-icon">📄</span>
@@ -752,7 +667,6 @@ onMounted(() => {
                   </div>
                 </div>
                 
-                <!-- 已加载的文件 -->
                 <div v-else-if="message.fileLoaded" class="file-loaded">
                   <div class="placeholder-content">
                     <span class="placeholder-icon">✓</span>
@@ -761,7 +675,6 @@ onMounted(() => {
                   </div>
                 </div>
                 
-                <!-- 加载失败的情况 -->
                 <div v-else class="file-placeholder error-placeholder">
                   <div class="placeholder-content">
                     <span class="placeholder-icon">❌</span>
@@ -771,13 +684,12 @@ onMounted(() => {
               </template>
             </div>
             
-            <!-- 文本消息的时间戳 -->
             <span v-if="!message.isFile" class="message-time">{{ message.timestamp || '刚刚' }}</span>
           </div>
         </div>
         
         <div v-if="messages.length === 0" class="empty-state">
-          <p>还没有消息，开始聊天吧！</p>
+          <p>还没有消息，开始发送内容吧！</p>
         </div>
       </div>
     </div>
@@ -807,47 +719,22 @@ onMounted(() => {
           }"
         ></textarea>
         
-        <input
-          ref="fileInputRef"
-          type="file"
-          @change="onFileChange"
-          style="display: none;"
-        />
+        <input ref="fileInputRef" type="file" @change="onFileChange" style="display: none;" />
         
-        <button
-          type="button"
-          class="action-button image-button"
-          @click="triggerFileSelect"
-          title="选择文件"
-        >
+        <button type="button" class="action-button" @click="triggerFileSelect" title="选择文件">
           <span class="button-icon">📎</span>
         </button>
         
-        <button
-          type="button"
-          class="send-button"
-          @click="postText"
-          :disabled="!text_value.trim()"
-        >
+        <button type="button" class="send-button" @click="postText" :disabled="!text_value.trim()">
           <span class="send-icon">📤</span>
-                  <span class="send-text">发送</span>
+          <span class="send-text">发送</span>
         </button>
         
-        <button
-          type="button"
-          class="action-button refresh-button"
-          @click="getListData"
-          title="刷新消息"
-        >
+        <button type="button" class="action-button" @click="getListData" title="刷新消息">
           <span class="button-icon">🔄</span>
         </button>
         
-        <button
-          type="button"
-          class="action-button delete-button"
-          @click="deleteData"
-          title="删除所有消息"
-        >
+        <button type="button" class="action-button delete-button" @click="deleteData" title="删除所有消息">
           <span class="button-icon">🗑️</span>
         </button>
       </div>
@@ -875,11 +762,7 @@ onMounted(() => {
         <div class="modal-header">
           <h3>{{ modalImageFileName }}</h3>
           <div class="modal-actions">
-            <button
-              class="modal-button download-button"
-              @click="downloadImage(modalImageUrl, modalImageFileName)"
-              title="下载图片"
-            >
+            <button class="modal-button download-button" @click="downloadFile(messages.find(m => m.fileName === modalImageFileName)?.imageBlob!, modalImageFileName)" title="下载图片">
               <span class="download-icon">💾</span>
               <span class="download-text">下载</span>
             </button>
@@ -887,13 +770,26 @@ onMounted(() => {
           </div>
         </div>
         <div class="modal-body image-modal-body">
-          <img
-            :src="modalImageUrl"
-            :alt="modalImageFileName"
-            :title="modalImageFileName"
-            class="modal-image"
-            @click.stop
-          />
+          <img :src="modalImageUrl" :alt="modalImageFileName" class="modal-image" @click.stop />
+        </div>
+      </div>
+    </div>
+
+    <!-- 视频播放模态窗口 -->
+    <div v-if="showVideoModal" class="modal-overlay" @click="closeVideoModal">
+      <div class="modal-content image-modal" @click.stop>
+        <div class="modal-header">
+          <h3>{{ modalVideoFileName }}</h3>
+          <div class="modal-actions">
+            <button v-if="modalVideoBlob" class="modal-button download-button" @click="downloadFile(modalVideoBlob, modalVideoFileName)" title="下载视频">
+              <span class="download-icon">💾</span>
+              <span class="download-text">下载</span>
+            </button>
+            <button class="modal-close" @click="closeVideoModal">×</button>
+          </div>
+        </div>
+        <div class="modal-body image-modal-body">
+          <video :src="modalVideoUrl" controls autoplay class="modal-video" @click.stop></video>
         </div>
       </div>
     </div>
@@ -917,14 +813,7 @@ onMounted(() => {
   overflow-x: hidden;
   padding: 20px;
   background: linear-gradient(to bottom, #e5ddd5 0%, #e5ddd5 50%, #d2d2d2 100%);
-  background-image: 
-    repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 2px,
-      rgba(0, 0, 0, 0.03) 2px,
-      rgba(0, 0, 0, 0.03) 4px
-    );
+  background-image: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0, 0, 0, 0.03) 2px, rgba(0, 0, 0, 0.03) 4px);
   -webkit-overflow-scrolling: touch;
 }
 
@@ -945,10 +834,6 @@ onMounted(() => {
   justify-content: flex-end;
 }
 
-.message-received {
-  justify-content: flex-start;
-}
-
 .message-bubble {
   max-width: 70%;
   padding: 12px 16px;
@@ -956,18 +841,9 @@ onMounted(() => {
   position: relative;
   word-wrap: break-word;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
-}
-
-.message-sent .message-bubble {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
   border-bottom-right-radius: 4px;
-}
-
-.message-received .message-bubble {
-  background: white;
-  color: #333;
-  border-bottom-left-radius: 4px;
 }
 
 .message-text {
@@ -983,10 +859,6 @@ onMounted(() => {
   opacity: 0.7;
   margin-top: 4px;
   text-align: right;
-}
-
-.message-received .message-time {
-  text-align: left;
 }
 
 .image-message {
@@ -1021,18 +893,9 @@ onMounted(() => {
   background: rgba(255, 255, 255, 0.1);
 }
 
-.message-received .image-placeholder {
-  border-color: rgba(0, 0, 0, 0.2);
-  background: rgba(0, 0, 0, 0.05);
-}
-
 .image-placeholder:hover {
   background: rgba(255, 255, 255, 0.2);
   transform: scale(1.02);
-}
-
-.message-received .image-placeholder:hover {
-  background: rgba(0, 0, 0, 0.1);
 }
 
 .error-placeholder {
@@ -1041,22 +904,9 @@ onMounted(() => {
   cursor: default;
 }
 
-.error-placeholder:hover {
-  transform: none;
-}
-
 .loading-placeholder {
   cursor: default;
   pointer-events: none;
-}
-
-.loading-placeholder:hover {
-  transform: none;
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.message-received .loading-placeholder:hover {
-  background: rgba(0, 0, 0, 0.05);
 }
 
 .image-loading-container {
@@ -1073,13 +923,9 @@ onMounted(() => {
   margin: 8px 0;
 }
 
-.message-received .loading-progress-bar {
-  background: rgba(0, 0, 0, 0.1);
-}
-
 .loading-progress-fill {
   height: 100%;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #fff;
   transition: width 0.3s ease;
   border-radius: 2px;
 }
@@ -1114,20 +960,6 @@ onMounted(() => {
   padding: 16px;
 }
 
-.message-received .file-placeholder {
-  border-color: rgba(0, 0, 0, 0.2);
-  background: rgba(0, 0, 0, 0.05);
-}
-
-.file-placeholder:hover {
-  background: rgba(255, 255, 255, 0.2);
-  transform: scale(1.02);
-}
-
-.message-received .file-placeholder:hover {
-  background: rgba(0, 0, 0, 0.1);
-}
-
 .file-extension {
   display: block;
   font-size: 11px;
@@ -1149,30 +981,56 @@ onMounted(() => {
   padding: 16px;
 }
 
-.message-received .file-loaded {
-  border-color: rgba(76, 175, 80, 0.3);
-  background: rgba(76, 175, 80, 0.05);
-}
-
 .image-container {
   max-width: 300px;
   border-radius: 8px;
   overflow: hidden;
   cursor: pointer;
   transition: transform 0.2s ease;
+  position: relative;
 }
 
 .image-container:hover {
   transform: scale(1.02);
 }
 
-.message-image {
+.message-image, .message-video {
   width: 100%;
   height: auto;
   max-height: 300px;
   object-fit: contain;
   display: block;
   border-radius: 8px;
+}
+
+.video-preview-container {
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.video-play-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.2);
+  transition: background 0.3s ease;
+}
+
+.image-container:hover .video-play-overlay {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.play-icon {
+  color: white;
+  font-size: 40px;
+  text-shadow: 0 2px 10px rgba(0,0,0,0.5);
 }
 
 .empty-state {
@@ -1251,12 +1109,6 @@ onMounted(() => {
 .message-input:focus {
   border-color: #667eea;
   background: white;
-  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-}
-
-.message-input::placeholder {
-  color: #999;
-  opacity: 1;
 }
 
 .action-button {
@@ -1278,11 +1130,6 @@ onMounted(() => {
   border-color: #667eea;
   background: white;
   transform: translateY(-2px);
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
-}
-
-.action-button .button-icon {
-  font-size: 20px;
 }
 
 .send-button {
@@ -1298,18 +1145,7 @@ onMounted(() => {
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
   white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.send-button:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-}
-
-.send-button:active:not(:disabled) {
-  transform: translateY(0);
 }
 
 .send-button:disabled {
@@ -1317,22 +1153,13 @@ onMounted(() => {
   cursor: not-allowed;
 }
 
-.send-icon {
-  font-size: 16px;
-}
-
-.send-text {
-  font-size: 15px;
-}
-
-/* 模态窗口样式 */
 .modal-overlay {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.85);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1348,15 +1175,10 @@ onMounted(() => {
   max-height: 90vh;
   display: flex;
   flex-direction: column;
-  animation: slideUp 0.3s ease;
-}
-
-.error-modal {
-  max-width: 500px;
-  width: 90%;
 }
 
 .image-modal {
+  background: #1a1a1a;
   max-width: 95vw;
   max-height: 95vh;
 }
@@ -1365,57 +1187,32 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 20px;
-  border-bottom: 1px solid #e0e0e0;
-  gap: 12px;
+  padding: 15px 20px;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  background: #222;
+  color: white;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .modal-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
-}
-
-.modal-header h3 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: #333;
-}
-
-.download-button {
-  padding: 8px 16px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  border: none;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.download-button:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-}
-
-.download-icon {
-  font-size: 16px;
-}
-
-.download-text {
-  font-size: 14px;
+  gap: 12px;
 }
 
 .modal-close {
   background: none;
   border: none;
-  font-size: 28px;
-  color: #999;
+  color: #ccc;
+  font-size: 24px;
   cursor: pointer;
   padding: 0;
   width: 32px;
@@ -1424,23 +1221,12 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  transition: all 0.2s ease;
-  flex-shrink: 0;
+  transition: all 0.2s;
 }
 
 .modal-close:hover {
-  background: #f0f0f0;
-  color: #333;
-}
-
-.modal-body {
-  padding: 20px;
-  overflow-y: auto;
-  flex: 1;
-}
-
-.error-modal .modal-body {
-  max-height: 400px;
+  background: rgba(255,255,255,0.1);
+  color: white;
 }
 
 .image-modal-body {
@@ -1448,273 +1234,43 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 200px;
-  max-height: calc(95vh - 80px);
+  flex: 1;
+  overflow: hidden;
 }
 
-.modal-image {
+.modal-image, .modal-video {
   max-width: 100%;
-  max-height: calc(95vh - 80px);
+  max-height: calc(95vh - 65px);
   object-fit: contain;
-  display: block;
 }
 
-.modal-footer {
-  padding: 15px 20px;
-  border-top: 1px solid #e0e0e0;
-  display: flex;
-  justify-content: flex-end;
-}
-
-.modal-button {
-  padding: 10px 24px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+.download-button {
+  padding: 6px 12px;
+  background: rgba(255,255,255,0.1);
   color: white;
-  border: none;
-  border-radius: 8px;
-  font-size: 15px;
-  font-weight: 600;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 6px;
+  font-size: 13px;
   cursor: pointer;
-  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s;
 }
 
-.modal-button:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+.download-button:hover {
+  background: rgba(255,255,255,0.2);
 }
 
 @keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
-@keyframes slideUp {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* 移动端响应式 */
 @media (max-width: 768px) {
-  .chat-container {
-    height: 100%;
-    min-height: 0;
-  }
-
-  .messages-wrapper {
-    padding: 15px 12px;
-    min-height: 0;
-    flex: 1 1 auto;
-  }
-
-  .message-bubble {
-    max-width: 85%;
-    padding: 10px 14px;
-  }
-
-  .message-text {
-    font-size: 14px;
-  }
-
-  .image-placeholder {
-    width: 150px;
-    height: 120px;
-  }
-
-  .image-loading-container {
-    width: 150px;
-    height: 120px;
-  }
-
-  .file-placeholder,
-  .file-loaded {
-    width: 150px;
-    min-height: 100px;
-  }
-
-  .loading-progress-bar {
-    width: 120px;
-  }
-
-  .image-container {
-    max-width: 250px;
-  }
-
-  .message-image {
-    max-height: 250px;
-  }
-
-  .input-container {
-    padding: 12px 15px;
-    padding-bottom: calc(12px + env(safe-area-inset-bottom));
-  }
-
-  .input-wrapper {
-    gap: 6px;
-  }
-
-  .message-input {
-    padding: 10px 14px;
-    font-size: 14px;
-  }
-
-  .action-button {
-    width: 40px;
-    height: 40px;
-  }
-
-  .action-button .button-icon {
-    font-size: 18px;
-  }
-
-  .send-button {
-    padding: 10px 20px;
-    font-size: 14px;
-  }
-
-  .send-text {
-    display: none;
-  }
-
-  .send-icon {
-    font-size: 18px;
-  }
-  
-  .download-text {
-    display: none;
-  }
-  
-  .download-icon {
-    font-size: 18px;
-  }
-}
-
-@media (max-width: 480px) {
-  .chat-container {
-    height: 100%;
-    min-height: 0;
-  }
-
-  .messages-wrapper {
-    padding: 12px 10px;
-    min-height: 0;
-    flex: 1 1 auto;
-  }
-
-  .message-bubble {
-    max-width: 90%;
-    padding: 8px 12px;
-  }
-
-  .message-text {
-    font-size: 13px;
-  }
-
-  .message-time {
-    font-size: 10px;
-  }
-
-  .image-placeholder {
-    width: 120px;
-    height: 100px;
-  }
-
-  .image-loading-container {
-    width: 120px;
-    height: 100px;
-  }
-
-  .file-placeholder,
-  .file-loaded {
-    width: 120px;
-    min-height: 80px;
-  }
-
-  .loading-progress-bar {
-    width: 100px;
-  }
-
-  .placeholder-icon {
-    font-size: 24px;
-  }
-
-  .placeholder-text {
-    font-size: 10px;
-  }
-
-  .image-container {
-    max-width: 200px;
-  }
-
-  .message-image {
-    max-height: 200px;
-  }
-
-  .input-container {
-    padding: 10px 12px;
-    padding-bottom: calc(10px + env(safe-area-inset-bottom));
-  }
-
-  .input-wrapper {
-    gap: 4px;
-  }
-
-  .message-input {
-    padding: 8px 12px;
-    font-size: 13px;
-  }
-
-  .action-button {
-    width: 36px;
-    height: 36px;
-  }
-
-  .action-button .button-icon {
-    font-size: 16px;
-  }
-
-  .send-button {
-    padding: 8px 16px;
-    min-width: 44px;
-  }
-  
-  .download-text {
-    display: none;
-  }
-  
-  .download-button {
-    padding: 6px 12px;
-  }
-  
-  .download-icon {
-    font-size: 16px;
-  }
-}
-
-/* 滚动条样式 */
-.messages-wrapper::-webkit-scrollbar {
-  width: 6px;
-}
-
-.messages-wrapper::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.messages-wrapper::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 3px;
-}
-
-.messages-wrapper::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.3);
+  .message-bubble { max-width: 85%; }
+  .image-placeholder, .image-loading-container { width: 150px; height: 120px; }
+  .file-placeholder, .file-loaded { width: 150px; min-height: 100px; }
+  .send-text, .download-text { display: none; }
 }
 </style>
