@@ -110,6 +110,7 @@ const closeImageModal = () => {
 
 // 显示视频预览模态窗口
 const showVideoPreview = (videoUrl: string, fileName: string, blob?: Blob) => {
+  console.log('Opening video preview:', { fileName, videoUrl });
   modalVideoUrl.value = videoUrl;
   modalVideoFileName.value = fileName;
   modalVideoBlob.value = blob || null;
@@ -319,10 +320,20 @@ const handleImageClick = (item: MessageItem) => {
 
 // 点击视频处理
 const handleVideoClick = (item: MessageItem) => {
+  console.log('Video clicked:', { 
+    id: item.id, 
+    imgLoaded: item.imgLoaded, 
+    videoUrl: !!item.videoUrl 
+  });
+  
   if (!item.imgLoaded) {
+    console.log('Video not loaded, starting loadFile...');
     loadFile(item);
   } else if (item.videoUrl && item.fileName) {
+    console.log('Video loaded, triggering showVideoPreview...');
     showVideoPreview(item.videoUrl, item.fileName, item.videoBlob);
+  } else {
+    console.warn('Video loaded but videoUrl or fileName is missing', item);
   }
 };
 
@@ -625,12 +636,11 @@ onMounted(() => {
                   </div>
                 </div>
                 
-                <div v-else-if="message.videoUrl" class="image-container video-preview-container">
+                <div v-else-if="message.videoUrl" class="image-container video-preview-container" @click="handleVideoClick(message)">
                   <video
                     :src="message.videoUrl"
                     class="message-video"
                     preload="metadata"
-                    @click="handleVideoClick(message)"
                   ></video>
                   <div class="video-play-overlay">
                     <span class="play-icon">▶</span>
@@ -1021,6 +1031,7 @@ onMounted(() => {
   justify-content: center;
   background: rgba(0, 0, 0, 0.2);
   transition: background 0.3s ease;
+  pointer-events: none; /* 允许点击穿透到父容器 */
 }
 
 .image-container:hover .video-play-overlay {
